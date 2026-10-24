@@ -168,7 +168,7 @@ Refer to [[Cross-Platform Sync]] for multi-machine workflows.`,
 			Content: `# 2026-10-24 Daily Reflection ☕
 
 Decided on the name **Tome**. 
-Polishing the UI: smooth gradient title, unbreakable borders, and subtle tree cursor highlighting.`,
+Polishing the UI: spacious browsing tree, zero line-wrapping, and smooth truncation with ellipsis.`,
 		},
 	}
 }
@@ -282,7 +282,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		usableWidth := max(20, m.width-2)
-		leftTotalWidth := max(22, min(34, usableWidth/3))
+		// Expanded, comfortable browsing tree width
+		leftTotalWidth := max(34, min(52, usableWidth*36/100))
 
 		switch msg.Type {
 		case tea.MouseWheelUp:
@@ -345,7 +346,8 @@ func (m *Model) recalculateViewport() {
 	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight-1)
 
 	usableWidth := max(20, m.width-2)
-	leftTotalWidth := max(22, min(34, usableWidth/3))
+	// Expanded tree width
+	leftTotalWidth := max(34, min(52, usableWidth*36/100))
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
 	viewportWidth := max(10, rightTotalWidth-4)
@@ -382,19 +384,23 @@ func (m Model) renderActivePreview(width int) string {
 	return markdown.RenderDocument(item.Content, width)
 }
 
-// truncateToWidth truncates string by visual column width (accounting for Nerd Fonts and UTF-8 runes)
-func truncateToWidth(s string, maxWidth int) string {
+// truncateWithDots truncates string with "..." strictly measuring terminal visual columns
+func truncateWithDots(s string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
 	}
 	if lipgloss.Width(s) <= maxWidth {
 		return s
 	}
+	if maxWidth <= 3 {
+		return strings.Repeat(".", maxWidth)
+	}
+	targetWidth := maxWidth - 3
 	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes)+"…") > maxWidth {
+	for len(runes) > 0 && lipgloss.Width(string(runes)) > targetWidth {
 		runes = runes[:len(runes)-1]
 	}
-	return string(runes) + "…"
+	return string(runes) + "..."
 }
 
 func (m Model) View() string {
@@ -412,7 +418,8 @@ func (m Model) View() string {
 	}
 	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight-1)
 
-	leftTotalWidth := max(22, min(34, usableWidth/3))
+	// Increased, comfortable tree width (34 to 52 columns)
+	leftTotalWidth := max(34, min(52, usableWidth*36/100))
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
 	// 2. Header Banner
@@ -440,7 +447,7 @@ func (m Model) View() string {
 
 	for i, visIdx := range m.visibleIndices {
 		if len(treeLines) >= maxVisibleRows {
-			break // Strictly ensure treeLines never exceeds pane height!
+			break // Strictly ensure treeLines never exceeds pane height
 		}
 
 		item := m.allItems[visIdx]
@@ -459,8 +466,8 @@ func (m Model) View() string {
 			}
 		}
 
-		// Strictly truncate by visual column width
-		rawTitle := truncateToWidth(treeBranch+icon+item.Title, availTitleWidth)
+		// Truncate cleanly with "..." if title exceeds available columns
+		rawTitle := truncateWithDots(treeBranch+icon+item.Title, availTitleWidth)
 		// Crucial: Replace spaces with non-breaking spaces (\u00a0) so Lipgloss NEVER word-wraps!
 		noBreakTitle := strings.ReplaceAll(rawTitle, " ", "\u00a0")
 
