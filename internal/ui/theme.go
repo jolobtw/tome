@@ -16,11 +16,11 @@ var (
 	ColorGoldGlow     = lipgloss.Color("#FFD166")
 	ColorDarkSlate    = lipgloss.Color("#13141C")
 	ColorPanelBg      = lipgloss.Color("#181A24")
-	ColorSelectBg     = lipgloss.Color("#252836") // Soft, subtle slate for selection
+	ColorSelectBg     = lipgloss.Color("#262938") // Subtle, calm slate for active item
 	ColorBorderMuted  = lipgloss.Color("#2E3244")
 	ColorBorderActive = lipgloss.Color("#FF7A00")
 	ColorTextMuted    = lipgloss.Color("#6C7086")
-	ColorTextRegular  = lipgloss.Color("#BAC2DE")
+	ColorTextRegular  = lipgloss.Color("#A6ADC8")
 	ColorTextBright   = lipgloss.Color("#FFFFFF")
 	ColorCyan         = lipgloss.Color("#89DCEB")
 	ColorGreen        = lipgloss.Color("#A6E3A1")
@@ -56,19 +56,21 @@ var (
 			BorderForeground(ColorFlameOrange).
 			Padding(0, 1)
 
-	// Tree Items: Elegant, calm, and subtle
+	// Tree Items:
+	// Unselected items are muted and calm
 	TreeNormalItem = lipgloss.NewStyle().
 			Foreground(ColorTextRegular)
 
+	// Unselected folder: soft muted slate-gold, NOT bold so it doesn't look active
 	TreeNormalFolder = lipgloss.NewStyle().
-				Foreground(ColorAmberGold).
-				Bold(true)
+				Foreground(lipgloss.Color("#C5A880"))
 
-	// Selected: subtle left accent bar, soft dark slate highlight, bright text
+	// Cursor for whatever is ACTUALLY selected
 	TreeCursor = lipgloss.NewStyle().
 			Foreground(ColorFlameOrange).
 			Bold(true)
 
+	// Selected text: bright white on soft subtle dark slate
 	TreeSelectedText = lipgloss.NewStyle().
 				Foreground(ColorTextBright).
 				Background(ColorSelectBg).

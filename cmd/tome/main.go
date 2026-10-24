@@ -177,7 +177,7 @@ func initialModel() Model {
 	items := sampleData()
 	m := Model{
 		allItems:    items,
-		selectedIdx: 1, // Start on first note
+		selectedIdx: 1, // Start on first note (The Arcane Architecture.md)
 		activePane:  0,
 		statusMsg:   "Welcome to Tome • Press [A] for Cloud AI Assistant",
 	}
@@ -226,7 +226,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.aiResponse += string(msg)
 		m.aiTokenIndex++
 		if m.aiTokenIndex < len(sampleAIStream) {
-			return m, streamNextToken(sampleAIStream[m.aiTokenIndex], 50*time.Millisecond)
+			return m, streamNextToken(sampleAIStream[m.aiTokenIndex], 45*time.Millisecond)
 		}
 		m.aiStreaming = false
 
@@ -268,7 +268,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.aiTokenIndex = 0
 				m.aiStreaming = true
 				m.recalculateViewport()
-				return m, streamNextToken(sampleAIStream[0], 70*time.Millisecond)
+				return m, streamNextToken(sampleAIStream[0], 60*time.Millisecond)
 			} else {
 				m.recalculateViewport()
 			}
@@ -281,7 +281,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		leftTotalWidth := max(24, min(36, m.width/3))
+		// Safe bounds checking
+		usableWidth := max(20, m.width-1)
+		leftTotalWidth := max(22, min(34, usableWidth/3))
 
 		switch msg.Type {
 		case tea.MouseWheelUp:
@@ -305,11 +307,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case tea.MouseLeft:
-			headerHeight := 2
-			clickedRow := msg.Y - headerHeight - 1 // account for top border
+			// Header takes: Row 0 (Title bar), Row 1 (Divider), Row 2 (Top Border of Pane)
+			// Item 0 begins at Row 3
+			clickedRow := msg.Y - 3
 			if msg.X < leftTotalWidth && clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
 				if m.selectedIdx == clickedRow {
-					// Second click toggles folder
+					// Second click on same item toggles folder
 					actualIdx := m.visibleIndices[clickedRow]
 					if m.allItems[actualIdx].IsFolder {
 						m.allItems[actualIdx].Expanded = !m.allItems[actualIdx].Expanded
@@ -341,14 +344,16 @@ func (m *Model) recalculateViewport() {
 	if m.aiOpen {
 		aiHeight = max(6, min(10, m.height/3))
 	}
-	panesHeight := max(5, m.height-headerHeight-footerHeight-aiHeight)
+	// Leave a 1-row safety buffer at the bottom to guarantee no terminal scrollback trigger
+	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight-1)
 
-	leftTotalWidth := max(24, min(36, m.width/3))
-	rightTotalWidth := max(20, m.width-leftTotalWidth)
+	usableWidth := max(20, m.width-1)
+	leftTotalWidth := max(22, min(34, usableWidth/3))
+	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
 	// Inner content dimensions (Lipgloss padding+borders = 4 horizontal, 2 vertical)
 	viewportWidth := max(10, rightTotalWidth-4)
-	viewportHeight := max(3, panesHeight-2)
+	viewportHeight := max(2, panesHeight-2)
 
 	if !m.ready {
 		m.viewport = viewport.New(viewportWidth, viewportHeight)
@@ -386,17 +391,19 @@ func (m Model) View() string {
 		return "\n  Summoning Tome..."
 	}
 
-	// 1. Strict Grid Dimension Calculation
+	// 1. Strict Grid Dimension Calculation with 1-char safety margins
+	usableWidth := max(20, m.width-1)
 	headerHeight := 2
 	footerHeight := 1
 	aiHeight := 0
 	if m.aiOpen {
 		aiHeight = max(6, min(10, m.height/3))
 	}
-	panesHeight := max(5, m.height-headerHeight-footerHeight-aiHeight)
+	// panesHeight safely bounded so total rendered lines NEVER exceeds m.height - 1
+	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight-1)
 
-	leftTotalWidth := max(24, min(36, m.width/3))
-	rightTotalWidth := max(20, m.width-leftTotalWidth)
+	leftTotalWidth := max(22, min(34, usableWidth/3))
+	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
 	// 2. Artistic Header Banner with Smooth Multi-Color Gradient
 	titleGradient := ui.Gradient("❖  T O M E", "#FF4500", "#FFD166")
@@ -406,15 +413,14 @@ func (m Model) View() string {
 	aiBadge := ui.ActiveBadgeStyle.Render("✦ Cloud AI: Online")
 	bannerRight := fmt.Sprintf("%s %s", wsBadge, aiBadge)
 
-	// Fill middle space exactly so header does not wrap
 	leftLen := lipgloss.Width(bannerLeft)
 	rightLen := lipgloss.Width(bannerRight)
-	gap := max(1, m.width-leftLen-rightLen-2)
+	gap := max(1, usableWidth-leftLen-rightLen-2)
 	row1 := " " + bannerLeft + strings.Repeat(" ", gap) + bannerRight
-	row2 := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", m.width))
+	row2 := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", usableWidth))
 	headerBlock := lipgloss.JoinVertical(lipgloss.Left, row1, row2)
 
-	// 3. Tree Pane (Left) - Subtle, Professional Highlight
+	// 3. Tree Pane (Left) - Unmistakable, Calm Highlighting
 	var treeLines []string
 	innerLeftWidth := leftTotalWidth - 4 // Content width inside borders & padding
 	for i, visIdx := range m.visibleIndices {
@@ -434,9 +440,9 @@ func (m Model) View() string {
 			}
 		}
 
-		// Text content (strictly truncated to prevent ANY wrapping)
+		// Strictly clamp title length to prevent line-wrapping
 		rawTitle := treeBranch + icon + item.Title
-		maxTitleLen := innerLeftWidth - 3 // leave room for cursor indicator
+		maxTitleLen := innerLeftWidth - 3
 		if maxTitleLen < 5 {
 			maxTitleLen = 5
 		}
@@ -445,12 +451,12 @@ func (m Model) View() string {
 		}
 
 		if i == m.selectedIdx {
-			// Subtle, calm indicator: Flame accent bar on left, crisp text with soft dark slate tint
+			// Selected item: Flame Orange bar on left, soft dark slate background, crisp white text
 			cursor := ui.TreeCursor.Render("▌ ")
 			text := ui.TreeSelectedText.Render(fmt.Sprintf("%-*s", innerLeftWidth-2, rawTitle))
 			treeLines = append(treeLines, cursor+text)
 		} else {
-			// Unselected item: 2 spaces indent instead of cursor
+			// Unselected item: 2 spaces instead of cursor bar
 			indent := "  "
 			var text string
 			if item.IsFolder {
@@ -481,7 +487,7 @@ func (m Model) View() string {
 		Height(panesHeight - 2).
 		Render(m.viewport.View())
 
-	// Horizontal side-by-side join (exactly equals m.width)
+	// Horizontal side-by-side join
 	panesView := lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
 
 	// 5. AI Research Drawer (if active)
@@ -497,7 +503,7 @@ func (m Model) View() string {
 			Render(statusIndicator)
 
 		aiView = ui.AIDrawerStyle.
-			Width(m.width - 4).
+			Width(usableWidth - 4).
 			Height(aiHeight - 2).
 			Render(titleBar + "\n" + m.aiResponse)
 	}
@@ -509,11 +515,11 @@ func (m Model) View() string {
 	kTab := ui.FooterKeyStyle.Render("[Tab]") + ui.FooterDescStyle.Render(" Switch Pane  ")
 	kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
 	footer := " " + kNav + kExp + kAi + kTab + kQuit
-	if len(footer) > m.width {
-		footer = footer[:m.width]
+	if len(footer) > usableWidth {
+		footer = footer[:usableWidth]
 	}
 
-	// 7. Strict Composition: Exactly fills the terminal frame
+	// 7. Strict Composition: Total height will NEVER exceed m.height
 	var fullScreen string
 	if m.aiOpen {
 		fullScreen = lipgloss.JoinVertical(lipgloss.Left, headerBlock, panesView, aiView, footer)
