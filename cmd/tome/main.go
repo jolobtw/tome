@@ -281,8 +281,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		// Safe bounds checking
-		usableWidth := max(20, m.width-1)
+		usableWidth := max(20, m.width-2)
 		leftTotalWidth := max(22, min(34, usableWidth/3))
 
 		switch msg.Type {
@@ -307,12 +306,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case tea.MouseLeft:
-			// Header takes: Row 0 (Title bar), Row 1 (Divider), Row 2 (Top Border of Pane)
-			// Item 0 begins at Row 3
+			// Row 0: Title bar, Row 1: Divider, Row 2: Top Border
+			// Item 0 is at Row 3
 			clickedRow := msg.Y - 3
 			if msg.X < leftTotalWidth && clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
 				if m.selectedIdx == clickedRow {
-					// Second click on same item toggles folder
 					actualIdx := m.visibleIndices[clickedRow]
 					if m.allItems[actualIdx].IsFolder {
 						m.allItems[actualIdx].Expanded = !m.allItems[actualIdx].Expanded
@@ -344,14 +342,12 @@ func (m *Model) recalculateViewport() {
 	if m.aiOpen {
 		aiHeight = max(6, min(10, m.height/3))
 	}
-	// Leave a 1-row safety buffer at the bottom to guarantee no terminal scrollback trigger
 	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight-1)
 
-	usableWidth := max(20, m.width-1)
+	usableWidth := max(20, m.width-2)
 	leftTotalWidth := max(22, min(34, usableWidth/3))
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
-	// Inner content dimensions (Lipgloss padding+borders = 4 horizontal, 2 vertical)
 	viewportWidth := max(10, rightTotalWidth-4)
 	viewportHeight := max(2, panesHeight-2)
 
@@ -386,29 +382,43 @@ func (m Model) renderActivePreview(width int) string {
 	return markdown.RenderDocument(item.Content, width)
 }
 
+// truncateToWidth truncates string by visual column width (accounting for Nerd Fonts and UTF-8 runes)
+func truncateToWidth(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes)+"…") > maxWidth {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
+}
+
 func (m Model) View() string {
 	if !m.ready || m.width <= 0 || m.height <= 0 {
 		return "\n  Summoning Tome..."
 	}
 
-	// 1. Strict Grid Dimension Calculation with 1-char safety margins
-	usableWidth := max(20, m.width-1)
+	// 1. Strict Grid Dimension Calculation
+	usableWidth := max(20, m.width-2) // 2-char margin prevents auto-wrap
 	headerHeight := 2
 	footerHeight := 1
 	aiHeight := 0
 	if m.aiOpen {
 		aiHeight = max(6, min(10, m.height/3))
 	}
-	// panesHeight safely bounded so total rendered lines NEVER exceeds m.height - 1
 	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight-1)
 
 	leftTotalWidth := max(22, min(34, usableWidth/3))
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
-	// 2. Artistic Header Banner with Smooth Multi-Color Gradient
+	// 2. Header Banner
 	titleGradient := ui.Gradient("❖  T O M E", "#FF4500", "#FFD166")
 	bannerLeft := fmt.Sprintf("✦ %s ❖ %s", titleGradient, ui.SubtitleStyle.Render("The Arcane Terminal Notebook"))
-	
+
 	wsBadge := ui.BadgeStyle.Render("󰉋 ~/Notes")
 	aiBadge := ui.ActiveBadgeStyle.Render("✦ Cloud AI: Online")
 	bannerRight := fmt.Sprintf("%s %s", wsBadge, aiBadge)
@@ -420,9 +430,10 @@ func (m Model) View() string {
 	row2 := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", usableWidth))
 	headerBlock := lipgloss.JoinVertical(lipgloss.Left, row1, row2)
 
-	// 3. Tree Pane (Left) - Unmistakable, Calm Highlighting
-	var treeLines []string
+	// 3. Tree Pane (Left)
 	innerLeftWidth := leftTotalWidth - 4 // Content width inside borders & padding
+	var treeLines []string
+
 	for i, visIdx := range m.visibleIndices {
 		item := m.allItems[visIdx]
 
@@ -440,31 +451,24 @@ func (m Model) View() string {
 			}
 		}
 
-		// Strictly clamp title length to prevent line-wrapping
-		rawTitle := treeBranch + icon + item.Title
-		maxTitleLen := innerLeftWidth - 3
-		if maxTitleLen < 5 {
-			maxTitleLen = 5
-		}
-		if len(rawTitle) > maxTitleLen {
-			rawTitle = rawTitle[:maxTitleLen-2] + "…"
-		}
+		// Available width for the title text (excluding the 2-cell cursor/indent prefix)
+		availTitleWidth := max(4, innerLeftWidth-3)
+		rawTitle := truncateToWidth(treeBranch+icon+item.Title, availTitleWidth)
 
 		if i == m.selectedIdx {
-			// Selected item: Flame Orange bar on left, soft dark slate background, crisp white text
-			cursor := ui.TreeCursor.Render("▌ ")
-			text := ui.TreeSelectedText.Render(fmt.Sprintf("%-*s", innerLeftWidth-2, rawTitle))
-			treeLines = append(treeLines, cursor+text)
+			// Single-line rendered item: Cursor bar directly preceding text on the EXACT SAME line
+			cursor := ui.TreeCursor.Render("▌") + " "
+			titlePill := ui.TreeSelectedText.Render(rawTitle)
+			treeLines = append(treeLines, cursor+titlePill)
 		} else {
-			// Unselected item: 2 spaces instead of cursor bar
 			indent := "  "
-			var text string
+			var titleText string
 			if item.IsFolder {
-				text = ui.TreeNormalFolder.Render(rawTitle)
+				titleText = ui.TreeNormalFolder.Render(rawTitle)
 			} else {
-				text = ui.TreeNormalItem.Render(rawTitle)
+				titleText = ui.TreeNormalItem.Render(rawTitle)
 			}
-			treeLines = append(treeLines, indent+text)
+			treeLines = append(treeLines, indent+titleText)
 		}
 	}
 
@@ -475,6 +479,7 @@ func (m Model) View() string {
 	leftView := leftStyle.
 		Width(leftTotalWidth - 4).
 		Height(panesHeight - 2).
+		MaxHeight(panesHeight - 2).
 		Render(strings.Join(treeLines, "\n"))
 
 	// 4. Preview Pane (Right)
@@ -485,6 +490,7 @@ func (m Model) View() string {
 	rightView := rightStyle.
 		Width(rightTotalWidth - 4).
 		Height(panesHeight - 2).
+		MaxHeight(panesHeight - 2).
 		Render(m.viewport.View())
 
 	// Horizontal side-by-side join
@@ -505,26 +511,34 @@ func (m Model) View() string {
 		aiView = ui.AIDrawerStyle.
 			Width(usableWidth - 4).
 			Height(aiHeight - 2).
+			MaxHeight(aiHeight - 2).
 			Render(titleBar + "\n" + m.aiResponse)
 	}
 
-	// 6. Clean 1-Row Footer
+	// 6. 1-Row Footer
 	kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Navigate  ")
 	kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Toggle Folder  ")
 	kAi := ui.FooterKeyStyle.Render("[A]") + ui.FooterDescStyle.Render(" Cloud AI  ")
 	kTab := ui.FooterKeyStyle.Render("[Tab]") + ui.FooterDescStyle.Render(" Switch Pane  ")
 	kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
 	footer := " " + kNav + kExp + kAi + kTab + kQuit
-	if len(footer) > usableWidth {
+	if lipgloss.Width(footer) > usableWidth {
 		footer = footer[:usableWidth]
 	}
 
-	// 7. Strict Composition: Total height will NEVER exceed m.height
+	// 7. Compose View
 	var fullScreen string
 	if m.aiOpen {
 		fullScreen = lipgloss.JoinVertical(lipgloss.Left, headerBlock, panesView, aiView, footer)
 	} else {
 		fullScreen = lipgloss.JoinVertical(lipgloss.Left, headerBlock, panesView, footer)
+	}
+
+	// 8. Absolute Guarantee: Never return more lines than terminal height
+	lines := strings.Split(fullScreen, "\n")
+	if len(lines) >= m.height && m.height > 2 {
+		lines = lines[:m.height-1]
+		fullScreen = strings.Join(lines, "\n")
 	}
 
 	return fullScreen
