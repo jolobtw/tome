@@ -1313,8 +1313,13 @@ func (m *Model) confirmQuickLog() {
 	fileName := fmt.Sprintf("%s-quick-log.md", dateStr)
 	targetPath := filepath.Join(m.workspacePath, fileName)
 
-	// Create file with header if it doesn't exist yet
-	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+	// Ensure file exists with header, and verify it ends with a newline before appending
+	prefix := ""
+	if existingBytes, err := os.ReadFile(targetPath); err == nil {
+		if len(existingBytes) > 0 && !strings.HasSuffix(string(existingBytes), "\n") {
+			prefix = "\n"
+		}
+	} else if os.IsNotExist(err) {
 		header := fmt.Sprintf("# Daily Quick Log (%s)\n\n", dateStr)
 		_ = os.WriteFile(targetPath, []byte(header), 0644)
 	}
@@ -1322,7 +1327,7 @@ func (m *Model) confirmQuickLog() {
 	// Append log line
 	f, err := os.OpenFile(targetPath, os.O_APPEND|os.O_WRONLY, 0644)
 	if err == nil {
-		_, _ = f.WriteString(fmt.Sprintf("- **[%s]** %s\n", timeStr, text))
+		_, _ = f.WriteString(fmt.Sprintf("%s- **[%s]** %s\n", prefix, timeStr, text))
 		_ = f.Close()
 	}
 

@@ -2,10 +2,24 @@ package markdown
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"tome/internal/ui"
+)
+
+var (
+	wikiLinkRe   = regexp.MustCompile(`\[\[([^\]\|]+)(?:\|([^\]]+))?\]\]`)
+	codeRe       = regexp.MustCompile("`([^`]+)`")
+	boldItalicRe = regexp.MustCompile(`\*\*\*([^*]+)\*\*\*`)
+	boldAstRe    = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	boldUndRe    = regexp.MustCompile(`__([^_]+)__`)
+	italicAstRe  = regexp.MustCompile(`(^|[\s\(\[\{<"'])\*([^*\s](?:[^*]*[^*\s])?)\*([\s\)\|\}\]>"'.,!?;:]|$)`)
+	italicUndRe  = regexp.MustCompile(`(^|[\s\(\[\{<"'])_([^\s_](?:[^_]*[^\s_])?)_([\s\)\|\}\]>"'.,!?;:]|$)`)
+	strikeRe     = regexp.MustCompile(`~~([^~]+)~~`)
+	highlightRe  = regexp.MustCompile(`==([^=]+)==`)
+	underlineRe  = regexp.MustCompile(`<(?:u|ins)>([^<]+)</(?:u|ins)>`)
 )
 
 // wrapText breaks a string into lines that do not exceed maxWidth visual columns
@@ -122,12 +136,11 @@ func RenderDocument(raw string, width int) string {
 			content := strings.TrimPrefix(line, ">")
 			content = strings.TrimPrefix(content, " ")
 			bar := lipgloss.NewStyle().Foreground(currentCalloutColor).Render("  ▎ ")
-			textStyle := lipgloss.NewStyle().Foreground(ui.ColorTextRegular)
 
 			availWidth := max(10, width-8)
 			wrapped := wrapText(formatInlineText(content), availWidth)
 			for _, wLine := range wrapped {
-				rendered = append(rendered, bar+textStyle.Render(wLine))
+				rendered = append(rendered, bar+wLine)
 			}
 			continue
 		}
@@ -183,15 +196,14 @@ func RenderDocument(raw string, width int) string {
 			baseMargin := strings.Repeat("  ", depth+1)
 			chk := lipgloss.NewStyle().Foreground(ui.ColorGreen).Bold(true).Render(baseMargin + "✔ ")
 			indent := baseMargin + "  "
-			textStyle := lipgloss.NewStyle().Foreground(ui.ColorTextMuted)
 
 			availWidth := max(10, width-len(indent)-4)
 			wrapped := wrapText(formatInlineText(body), availWidth)
 			for idx, wLine := range wrapped {
 				if idx == 0 {
-					rendered = append(rendered, chk+textStyle.Render(wLine))
+					rendered = append(rendered, chk+wLine)
 				} else {
-					rendered = append(rendered, indent+textStyle.Render(wLine))
+					rendered = append(rendered, indent+wLine)
 				}
 			}
 			continue
@@ -203,15 +215,14 @@ func RenderDocument(raw string, width int) string {
 			baseMargin := strings.Repeat("  ", depth+1)
 			unchk := lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render(baseMargin + "○ ")
 			indent := baseMargin + "  "
-			textStyle := lipgloss.NewStyle().Foreground(ui.ColorTextRegular)
 
 			availWidth := max(10, width-len(indent)-4)
 			wrapped := wrapText(formatInlineText(body), availWidth)
 			for idx, wLine := range wrapped {
 				if idx == 0 {
-					rendered = append(rendered, unchk+textStyle.Render(wLine))
+					rendered = append(rendered, unchk+wLine)
 				} else {
-					rendered = append(rendered, indent+textStyle.Render(wLine))
+					rendered = append(rendered, indent+wLine)
 				}
 			}
 			continue
@@ -244,15 +255,14 @@ func RenderDocument(raw string, width int) string {
 			baseMargin := strings.Repeat("  ", depth+1)
 			bullet := lipgloss.NewStyle().Foreground(bulletColor).Render(baseMargin + bulletGlyph)
 			indent := baseMargin + "  "
-			textStyle := lipgloss.NewStyle().Foreground(ui.ColorTextRegular)
 
 			availWidth := max(10, width-len(indent)-4)
 			wrapped := wrapText(formatInlineText(body), availWidth)
 			for idx, wLine := range wrapped {
 				if idx == 0 {
-					rendered = append(rendered, bullet+textStyle.Render(wLine))
+					rendered = append(rendered, bullet+wLine)
 				} else {
-					rendered = append(rendered, indent+textStyle.Render(wLine))
+					rendered = append(rendered, indent+wLine)
 				}
 			}
 			continue
@@ -273,23 +283,94 @@ func RenderDocument(raw string, width int) string {
 	return strings.Join(rendered, "\n")
 }
 
-// formatInlineText handles inline wiki-links [[Link]], `code`, and **bold**
-func formatInlineText(text string) string {
-	// 1. Wiki-links: [[Target]]
-	for strings.Contains(text, "[[") && strings.Contains(text, "]]") {
-		start := strings.Index(text, "[[")
-		end := strings.Index(text, "]]")
-		if start < end {
-			link := text[start+2 : end]
-			styledLink := lipgloss.NewStyle().
-				Foreground(ui.ColorCyan).
-				Underline(true).
-				Render("󰌹 " + link)
-			text = text[:start] + styledLink + text[end+2:]
-		} else {
-			break
-		}
+// styleSpan styles each word individually within a span so ANSI codes stay tightly bound when line-wrapped
+func styleSpan(text string, style lipgloss.Style) string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return ""
 	}
+	styled := make([]string, len(words))
+	for i, w := range words {
+		styled[i] = style.Render(w)
+	}
+	return strings.Join(styled, " ")
+}
+
+// formatInlineText handles inline markdown formatting: links, code, bold, italic, strikethrough, highlights, and underlines
+func formatInlineText(text string) string {
+	boldStyle := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorTextBright)
+	italicStyle := lipgloss.NewStyle().Italic(true).Foreground(ui.ColorAmberGold)
+	boldItalicStyle := lipgloss.NewStyle().Bold(true).Italic(true).Foreground(ui.ColorGoldGlow)
+	strikeStyle := lipgloss.NewStyle().Strikethrough(true).Foreground(ui.ColorTextMuted)
+	hlStyle := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorFlameOrange)
+	uStyle := lipgloss.NewStyle().Underline(true).Foreground(ui.ColorTextBright)
+	codeStyle := lipgloss.NewStyle().Foreground(ui.ColorCyan)
+	linkStyle := lipgloss.NewStyle().Foreground(ui.ColorCyan).Underline(true)
+
+	// 1. Wiki-links: [[Target]] or [[Target|Alias]]
+	text = wikiLinkRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := wikiLinkRe.FindStringSubmatch(m)
+		target := sub[1]
+		display := target
+		if len(sub) > 2 && sub[2] != "" {
+			display = sub[2]
+		}
+		return styleSpan("󰌹 "+display, linkStyle)
+	})
+
+	// 2. Inline code: `code`
+	text = codeRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := codeRe.FindStringSubmatch(m)
+		return styleSpan(sub[1], codeStyle)
+	})
+
+	// 3. Bold & Italic: ***text***
+	text = boldItalicRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := boldItalicRe.FindStringSubmatch(m)
+		return styleSpan(sub[1], boldItalicStyle)
+	})
+
+	// 4. Bold: **text** or __text__
+	text = boldAstRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := boldAstRe.FindStringSubmatch(m)
+		return styleSpan(sub[1], boldStyle)
+	})
+	text = boldUndRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := boldUndRe.FindStringSubmatch(m)
+		return styleSpan(sub[1], boldStyle)
+	})
+
+	// 5. Italic: *text* or _text_
+	for italicAstRe.MatchString(text) {
+		text = italicAstRe.ReplaceAllStringFunc(text, func(m string) string {
+			sub := italicAstRe.FindStringSubmatch(m)
+			return sub[1] + styleSpan(sub[2], italicStyle) + sub[3]
+		})
+	}
+	for italicUndRe.MatchString(text) {
+		text = italicUndRe.ReplaceAllStringFunc(text, func(m string) string {
+			sub := italicUndRe.FindStringSubmatch(m)
+			return sub[1] + styleSpan(sub[2], italicStyle) + sub[3]
+		})
+	}
+
+	// 6. Strikethrough: ~~text~~
+	text = strikeRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := strikeRe.FindStringSubmatch(m)
+		return styleSpan(sub[1], strikeStyle)
+	})
+
+	// 7. Highlight: ==text==
+	text = highlightRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := highlightRe.FindStringSubmatch(m)
+		return styleSpan(sub[1], hlStyle)
+	})
+
+	// 8. Underline: <u>text</u> or <ins>text</ins>
+	text = underlineRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := underlineRe.FindStringSubmatch(m)
+		return styleSpan(sub[1], uStyle)
+	})
 
 	return text
 }
