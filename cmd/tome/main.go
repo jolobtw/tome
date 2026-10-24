@@ -383,25 +383,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If cheat sheet drawer is open, check keys
 			if m.cheatSheetOpen && !m.cheatSliding {
 				switch msg.String() {
-				case "ctrl+/", "ctrl+_", "f1", "esc":
+				case "ctrl+g", "ctrl+/", "ctrl+_", "ctrl+?", "f1", "esc":
 					m.cheatSliding = true
 					m.cheatSlideDir = -1
 					return m, slideTick()
 				default:
-					// Dismiss cheat sheet drawer and pass key directly to editor
-					m.cheatSliding = true
-					m.cheatSlideDir = -1
-					var cmd tea.Cmd
-					m.editor, cmd = m.editor.Update(msg)
-					if m.saveStatus != "" {
-						m.saveStatus = "● Modified"
-					}
-					return m, tea.Batch(cmd, slideTick())
+					return m, nil
 				}
 			}
 
 			switch msg.String() {
-			case "ctrl+/", "ctrl+_", "f1":
+			case "ctrl+g", "ctrl+/", "ctrl+_", "ctrl+?", "f1":
 				m.cheatSheetOpen = true
 				m.cheatSliding = true
 				m.cheatSlideDir = 1
@@ -447,9 +439,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// When cheat sheet drawer is open in preview mode, route keys to dismiss it
 		if m.cheatSheetOpen && !m.cheatSliding {
-			m.cheatSliding = true
-			m.cheatSlideDir = -1
-			return m, slideTick()
+			switch msg.String() {
+			case "ctrl+g", "ctrl+/", "ctrl+_", "ctrl+?", "f1", "esc", "q", "enter":
+				m.cheatSliding = true
+				m.cheatSlideDir = -1
+				return m, slideTick()
+			default:
+				return m, nil
+			}
 		}
 
 		// When AI drawer is open, route keys to the assistant
@@ -616,7 +613,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.aiInput.Width = max(20, m.width-12)
 			return m, slideTick()
 
-		case "ctrl+/", "ctrl+_", "f1", "?":
+		case "ctrl+g", "ctrl+/", "ctrl+_", "ctrl+?", "f1", "?":
 			m.cheatSheetOpen = true
 			m.cheatSliding = true
 			m.cheatSlideDir = 1
@@ -630,8 +627,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Clicking mouse while cheat sheet is open dismisses it
-		if m.cheatSheetOpen && !m.cheatSliding {
+		// Only a deliberate LEFT CLICK while cheat sheet is open dismisses it (NOT mouse movement!)
+		if msg.Type == tea.MouseLeft && m.cheatSheetOpen && !m.cheatSliding {
 			m.cheatSliding = true
 			m.cheatSlideDir = -1
 			return m, slideTick()
@@ -655,6 +652,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case tea.MouseLeft:
+				if m.cheatSheetOpen && !m.cheatSliding {
+					m.cheatSliding = true
+					m.cheatSlideDir = -1
+					return m, slideTick()
+				}
+
 				// Translate screen coordinates to local editor coordinates:
 				// X: right pane starts at leftTotalWidth; 1 col border + 1 col padding = +2
 				// Y: 2 header banner rows + 1 top border row + 1 editor title row = 4 rows
@@ -1014,7 +1017,7 @@ func (m Model) View() string {
 		kSave := ui.FooterKeyStyle.Render("[Ctrl+S]") + ui.FooterDescStyle.Render(" Save  ")
 		kDone := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Save & Finish  ")
 		kDiscard := ui.FooterKeyStyle.Render("[Ctrl+Q]") + ui.FooterDescStyle.Render(" Discard  ")
-		kCheat := ui.FooterKeyStyle.Render("[Ctrl+/]") + ui.FooterDescStyle.Render(" Cheat Sheet")
+		kCheat := ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide")
 		var saveBadge string
 		if m.saveStatus != "" {
 			if m.saveStatus == "✓ Saved" {
@@ -1024,7 +1027,7 @@ func (m Model) View() string {
 			}
 		}
 		if m.cheatSheetOpen {
-			kCloseCheat := ui.FooterKeyStyle.Render("[Esc/Ctrl+/]") + ui.FooterDescStyle.Render(" Close Cheat Sheet  ")
+			kCloseCheat := ui.FooterKeyStyle.Render("[Esc/F1]") + ui.FooterDescStyle.Render(" Close Guide  ")
 			footer = " ✦ Formatting Guide │ " + kCloseCheat + kSave + kDiscard
 		} else {
 			footer = " ✎ In-Place Editor │ " + saveBadge + kSave + kDone + kDiscard + kCheat
@@ -1035,7 +1038,7 @@ func (m Model) View() string {
 		kQuit := ui.FooterKeyStyle.Render("[Ctrl+C]") + ui.FooterDescStyle.Render(" Quit")
 		footer = " " + kEnter + kClose + kQuit
 	} else if m.cheatSheetOpen {
-		kClose := ui.FooterKeyStyle.Render("[Esc/Ctrl+/]") + ui.FooterDescStyle.Render(" Close Cheat Sheet  ")
+		kClose := ui.FooterKeyStyle.Render("[Esc/F1]") + ui.FooterDescStyle.Render(" Close Guide  ")
 		kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
 		footer = " ✦ Formatting Guide │ " + kClose + kQuit
 	} else {
@@ -1045,7 +1048,7 @@ func (m Model) View() string {
 		kNew := ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New Note  ")
 		kFolder := ui.FooterKeyStyle.Render("[F]") + ui.FooterDescStyle.Render(" Folder  ")
 		kLog := ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  ")
-		kCheat := ui.FooterKeyStyle.Render("[Ctrl+/]") + ui.FooterDescStyle.Render(" Guide  ")
+		kCheat := ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide  ")
 		kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
 		kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
 		footer = " " + kNav + kExp + kEdit + kNew + kFolder + kLog + kCheat + kAi + kQuit
