@@ -282,7 +282,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		usableWidth := max(20, m.width-2)
-		// Expanded, comfortable browsing tree width
 		leftTotalWidth := max(34, min(52, usableWidth*36/100))
 
 		switch msg.Type {
@@ -343,13 +342,14 @@ func (m *Model) recalculateViewport() {
 	if m.aiOpen {
 		aiHeight = max(6, min(10, m.height/3))
 	}
-	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight-1)
+	// Panes fill the exact remaining vertical space down to the footer
+	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight)
 
 	usableWidth := max(20, m.width-2)
-	// Expanded tree width
 	leftTotalWidth := max(34, min(52, usableWidth*36/100))
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
+	// Inner content dimensions (Borders take 2 vertical rows: top & bottom)
 	viewportWidth := max(10, rightTotalWidth-4)
 	viewportHeight := max(2, panesHeight-2)
 
@@ -408,21 +408,22 @@ func (m Model) View() string {
 		return "\n  Summoning Tome..."
 	}
 
-	// 1. Strict Grid Dimension Calculation
-	usableWidth := max(20, m.width-2) // 2-char margin prevents auto-wrap
+	// 1. Exact Screen Height Budgeting
 	headerHeight := 2
 	footerHeight := 1
 	aiHeight := 0
 	if m.aiOpen {
 		aiHeight = max(6, min(10, m.height/3))
 	}
-	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight-1)
+	// PanesHeight exactly spans from header to footer: Header(2) + PanesHeight + AI(aiHeight) + Footer(1) == m.height
+	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight)
+	panesContentHeight := panesHeight - 2 // Top border (1) + bottom border (1) = 2
 
-	// Increased, comfortable tree width (34 to 52 columns)
+	usableWidth := max(20, m.width-2) // 2-char margin prevents auto-wrap
 	leftTotalWidth := max(34, min(52, usableWidth*36/100))
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
-	// 2. Header Banner
+	// 2. Header Banner (Exactly 2 rows)
 	titleGradient := ui.Gradient("❖  T O M E", "#FF4500", "#FFD166")
 	bannerLeft := fmt.Sprintf("✦ %s ❖ %s", titleGradient, ui.SubtitleStyle.Render("The Arcane Terminal Notebook"))
 
@@ -441,13 +442,12 @@ func (m Model) View() string {
 	innerLeftWidth := leftTotalWidth - 4 // Content width inside borders & padding
 	var treeLines []string
 
-	// Title max columns: inner width minus 2 columns for cursor/indent
 	availTitleWidth := max(4, innerLeftWidth-2)
-	maxVisibleRows := panesHeight - 2
+	maxVisibleRows := panesContentHeight
 
 	for i, visIdx := range m.visibleIndices {
 		if len(treeLines) >= maxVisibleRows {
-			break // Strictly ensure treeLines never exceeds pane height
+			break // Strictly ensure treeLines never exceeds pane content height
 		}
 
 		item := m.allItems[visIdx]
@@ -492,10 +492,10 @@ func (m Model) View() string {
 	if m.activePane == 0 {
 		leftStyle = ui.ActivePaneStyle
 	}
+	// Content height is panesContentHeight. With 2 border rows, total rendered box is exactly panesHeight!
 	leftView := leftStyle.
 		Width(leftTotalWidth - 4).
-		Height(panesHeight - 2).
-		MaxHeight(panesHeight - 2).
+		Height(panesContentHeight).
 		Render(strings.Join(treeLines, "\n"))
 
 	// 4. Preview Pane (Right)
@@ -505,11 +505,10 @@ func (m Model) View() string {
 	}
 	rightView := rightStyle.
 		Width(rightTotalWidth - 4).
-		Height(panesHeight - 2).
-		MaxHeight(panesHeight - 2).
+		Height(panesContentHeight).
 		Render(m.viewport.View())
 
-	// Horizontal side-by-side join
+	// Horizontal side-by-side join (total height = panesHeight)
 	panesView := lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
 
 	// 5. AI Research Drawer (if active)
@@ -524,14 +523,14 @@ func (m Model) View() string {
 			Foreground(ui.ColorAmberGold).
 			Render(statusIndicator)
 
+		aiContentHeight := max(2, aiHeight-2)
 		aiView = ui.AIDrawerStyle.
 			Width(usableWidth - 4).
-			Height(aiHeight - 2).
-			MaxHeight(aiHeight - 2).
+			Height(aiContentHeight).
 			Render(titleBar + "\n" + m.aiResponse)
 	}
 
-	// 6. 1-Row Footer
+	// 6. 1-Row Footer (Affixed to the bottom of the screen)
 	kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Navigate  ")
 	kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Toggle Folder  ")
 	kAi := ui.FooterKeyStyle.Render("[A]") + ui.FooterDescStyle.Render(" Cloud AI  ")
@@ -550,10 +549,10 @@ func (m Model) View() string {
 		fullScreen = lipgloss.JoinVertical(lipgloss.Left, headerBlock, panesView, footer)
 	}
 
-	// 8. Absolute Guarantee: Never return more lines than terminal height
+	// 8. Absolute Guarantee: Exactly fits m.height without emitting extra newlines
 	lines := strings.Split(fullScreen, "\n")
-	if len(lines) >= m.height && m.height > 2 {
-		lines = lines[:m.height-1]
+	if len(lines) > m.height && m.height > 2 {
+		lines = lines[:m.height]
 		fullScreen = strings.Join(lines, "\n")
 	}
 
