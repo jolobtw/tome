@@ -306,8 +306,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case tea.MouseLeft:
-			// Row 0: Title bar, Row 1: Divider, Row 2: Top Border
-			// Item 0 is at Row 3
+			// Row 0: Title bar, Row 1: Divider, Row 2: Top Border of Pane
+			// Item 0 begins at Row 3
 			clickedRow := msg.Y - 3
 			if msg.X < leftTotalWidth && clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
 				if m.selectedIdx == clickedRow {
@@ -434,7 +434,15 @@ func (m Model) View() string {
 	innerLeftWidth := leftTotalWidth - 4 // Content width inside borders & padding
 	var treeLines []string
 
+	// Title max columns: inner width minus 2 columns for cursor/indent
+	availTitleWidth := max(4, innerLeftWidth-2)
+	maxVisibleRows := panesHeight - 2
+
 	for i, visIdx := range m.visibleIndices {
+		if len(treeLines) >= maxVisibleRows {
+			break // Strictly ensure treeLines never exceeds pane height!
+		}
+
 		item := m.allItems[visIdx]
 
 		treeBranch := ""
@@ -451,22 +459,23 @@ func (m Model) View() string {
 			}
 		}
 
-		// Available width for the title text (excluding the 2-cell cursor/indent prefix)
-		availTitleWidth := max(4, innerLeftWidth-3)
+		// Strictly truncate by visual column width
 		rawTitle := truncateToWidth(treeBranch+icon+item.Title, availTitleWidth)
+		// Crucial: Replace spaces with non-breaking spaces (\u00a0) so Lipgloss NEVER word-wraps!
+		noBreakTitle := strings.ReplaceAll(rawTitle, " ", "\u00a0")
 
 		if i == m.selectedIdx {
-			// Single-line rendered item: Cursor bar directly preceding text on the EXACT SAME line
-			cursor := ui.TreeCursor.Render("▌") + " "
-			titlePill := ui.TreeSelectedText.Render(rawTitle)
+			// Single unbreakable line: Flame orange cursor bar + text
+			cursor := ui.TreeCursor.Render("▌") + "\u00a0"
+			titlePill := ui.TreeSelectedText.Render(noBreakTitle)
 			treeLines = append(treeLines, cursor+titlePill)
 		} else {
-			indent := "  "
+			indent := "\u00a0\u00a0"
 			var titleText string
 			if item.IsFolder {
-				titleText = ui.TreeNormalFolder.Render(rawTitle)
+				titleText = ui.TreeNormalFolder.Render(noBreakTitle)
 			} else {
-				titleText = ui.TreeNormalItem.Render(rawTitle)
+				titleText = ui.TreeNormalItem.Render(noBreakTitle)
 			}
 			treeLines = append(treeLines, indent+titleText)
 		}
