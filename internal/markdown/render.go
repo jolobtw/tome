@@ -109,7 +109,7 @@ func RenderDocument(raw string, width int) string {
 			title := strings.TrimPrefix(trimmed, "### ")
 			h3 := lipgloss.NewStyle().
 				Bold(true).
-				Foreground(ui.ColorGoldHighlight).
+				Foreground(ui.ColorGoldGlow).
 				Render("  " + title)
 			rendered = append(rendered, "", h3)
 			continue

@@ -15,15 +15,15 @@ import (
 
 // Item represents a node in the tree (folder or note)
 type Item struct {
-	ID        int
-	Title     string
-	Path      string
-	IsFolder  bool
-	Expanded  bool
-	Level     int
-	Content   string
-	ChildIDs  []int
-	ParentID  int
+	ID       int
+	Title    string
+	Path     string
+	IsFolder bool
+	Expanded bool
+	Level    int
+	Content  string
+	ChildIDs []int
+	ParentID int
 }
 
 type Model struct {
@@ -57,15 +57,15 @@ func streamNextToken(token string, delay time.Duration) tea.Cmd {
 }
 
 var sampleAIStream = []string{
-	"Analyzing your Tome workspace across all folders...\n\n",
-	"✦ **Found 3 relevant references** in your knowledge base:\n",
-	"  • `01 - Grimoire/The Arcane Architecture.md` (High relevance)\n",
-	"  • `02 - Codex/Cross-Platform Sync.md`\n",
-	"  • `03 - Journal/2026-10-24 Daily Reflection.md`\n\n",
-	"**Synthesis & Strategic Guidance**:\n",
-	"1. **Layout Integrity:** By adhering to a strict height budget, Tome eliminates UI overflow.\n",
-	"2. **Dual-Environment Velocity:** Pushing to GitLab triggers parallel compilation for Windows (.exe) and macOS (ARM64).\n",
-	"3. **Fluidity:** The Go event loop guarantees zero-lag mouse hover scrolling and instant switching.\n\n",
+	"Searching knowledge base across all active notebooks...\n\n",
+	"✦ **Found 3 relevant references** in your workspace:\n",
+	"  • `Grimoire/The Arcane Architecture.md` (High relevance)\n",
+	"  • `Codex/Cross-Platform Sync.md`\n",
+	"  • `Journal/2026-10-24 Daily Reflection.md`\n\n",
+	"**Synthesis & Strategic Findings**:\n",
+	"1. **Pixel-Perfect Viewport:** Strict mathematical column/row budgeting prevents border breakage.\n",
+	"2. **Subtle Aesthetic:** Selection cursor uses an elegant left accent bar (`▌`) instead of abrasive blocks.\n",
+	"3. **Multi-Platform Zero Setup:** Seamless compilation for Windows and Apple Silicon Mac via GitLab.\n\n",
 	"*(Press [Esc] or [A] to close this drawer)*",
 }
 
@@ -73,7 +73,7 @@ func sampleData() []Item {
 	return []Item{
 		{
 			ID:       0,
-			Title:    "Grimoire (Core Lore)",
+			Title:    "Grimoire",
 			IsFolder: true,
 			Expanded: true,
 			Level:    0,
@@ -89,7 +89,7 @@ func sampleData() []Item {
 			Content: `# The Arcane Architecture 📖
 
 > [!NOTE]
-> Tome is engineered to combine raw terminal velocity with obsidian-grade aesthetics.
+> Tome combines raw compiled terminal speed with Obsidian-grade aesthetics.
 
 ### Guiding Principles
 - [x] Zero external dependencies at runtime.
@@ -127,7 +127,7 @@ Refer to [[Cross-Platform Sync]] for multi-machine workflows.`,
 		},
 		{
 			ID:       3,
-			Title:    "Codex (Multi-Machine Sync)",
+			Title:    "Codex",
 			IsFolder: true,
 			Expanded: true,
 			Level:    0,
@@ -152,7 +152,7 @@ Refer to [[Cross-Platform Sync]] for multi-machine workflows.`,
 		},
 		{
 			ID:       5,
-			Title:    "Journal (Daily Thoughts)",
+			Title:    "Journal",
 			IsFolder: true,
 			Expanded: false,
 			Level:    0,
@@ -168,7 +168,7 @@ Refer to [[Cross-Platform Sync]] for multi-machine workflows.`,
 			Content: `# 2026-10-24 Daily Reflection ☕
 
 Decided on the name **Tome**. 
-Prototyping the strict height budget engine to ensure the AI assistant drawer never pushes elements off-screen.`,
+Polishing the UI: smooth gradient title, unbreakable borders, and subtle tree cursor highlighting.`,
 		},
 	}
 }
@@ -219,36 +219,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		// Strict layout budgeting
-		headerHeight := 2
-		footerHeight := 1
-		aiHeight := 0
-		if m.aiOpen {
-			aiHeight = max(6, min(10, m.height/3))
-		}
-		panesHeight := max(5, m.height-headerHeight-footerHeight-aiHeight)
-
-		leftWidth := max(24, min(36, m.width/3))
-		rightWidth := max(20, m.width-leftWidth-1)
-
-		viewportWidth := max(10, rightWidth-4)
-		viewportHeight := max(3, panesHeight-2)
-
-		if !m.ready {
-			m.viewport = viewport.New(viewportWidth, viewportHeight)
-			m.viewport.SetContent(m.renderActivePreview(viewportWidth))
-			m.ready = true
-		} else {
-			m.viewport.Width = viewportWidth
-			m.viewport.Height = viewportHeight
-			m.viewport.SetContent(m.renderActivePreview(viewportWidth))
-		}
+		m.recalculateViewport()
+		m.ready = true
 
 	case aiTokenMsg:
 		m.aiResponse += string(msg)
 		m.aiTokenIndex++
 		if m.aiTokenIndex < len(sampleAIStream) {
-			return m, streamNextToken(sampleAIStream[m.aiTokenIndex], 60*time.Millisecond)
+			return m, streamNextToken(sampleAIStream[m.aiTokenIndex], 50*time.Millisecond)
 		}
 		m.aiStreaming = false
 
@@ -289,9 +267,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.aiResponse = ""
 				m.aiTokenIndex = 0
 				m.aiStreaming = true
-				// Trigger recalculation of dimensions
 				m.recalculateViewport()
-				return m, streamNextToken(sampleAIStream[0], 80*time.Millisecond)
+				return m, streamNextToken(sampleAIStream[0], 70*time.Millisecond)
 			} else {
 				m.recalculateViewport()
 			}
@@ -304,23 +281,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		leftWidth := max(24, min(36, m.width/3))
+		leftTotalWidth := max(24, min(36, m.width/3))
 
 		switch msg.Type {
 		case tea.MouseWheelUp:
-			if msg.X < leftWidth {
-				// Scrolling over left tree navigates items
+			if msg.X < leftTotalWidth {
 				if m.selectedIdx > 0 {
 					m.selectedIdx--
 					m.updateViewportPreview()
 				}
 			} else {
-				// Scrolling over right preview scrolls document
 				m.viewport.LineUp(3)
 			}
 
 		case tea.MouseWheelDown:
-			if msg.X < leftWidth {
+			if msg.X < leftTotalWidth {
 				if m.selectedIdx < len(m.visibleIndices)-1 {
 					m.selectedIdx++
 					m.updateViewportPreview()
@@ -330,10 +305,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case tea.MouseLeft:
-			// Click selection in tree
 			headerHeight := 2
-			clickedRow := msg.Y - headerHeight
-			if msg.X < leftWidth && clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
+			clickedRow := msg.Y - headerHeight - 1 // account for top border
+			if msg.X < leftTotalWidth && clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
 				if m.selectedIdx == clickedRow {
 					// Second click toggles folder
 					actualIdx := m.visibleIndices[clickedRow]
@@ -357,6 +331,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) recalculateViewport() {
+	if m.width <= 0 || m.height <= 0 {
+		return
+	}
+
 	headerHeight := 2
 	footerHeight := 1
 	aiHeight := 0
@@ -364,17 +342,28 @@ func (m *Model) recalculateViewport() {
 		aiHeight = max(6, min(10, m.height/3))
 	}
 	panesHeight := max(5, m.height-headerHeight-footerHeight-aiHeight)
-	leftWidth := max(24, min(36, m.width/3))
-	rightWidth := max(20, m.width-leftWidth-1)
 
-	m.viewport.Width = max(10, rightWidth-4)
-	m.viewport.Height = max(3, panesHeight-2)
-	m.viewport.SetContent(m.renderActivePreview(m.viewport.Width))
+	leftTotalWidth := max(24, min(36, m.width/3))
+	rightTotalWidth := max(20, m.width-leftTotalWidth)
+
+	// Inner content dimensions (Lipgloss padding+borders = 4 horizontal, 2 vertical)
+	viewportWidth := max(10, rightTotalWidth-4)
+	viewportHeight := max(3, panesHeight-2)
+
+	if !m.ready {
+		m.viewport = viewport.New(viewportWidth, viewportHeight)
+	} else {
+		m.viewport.Width = viewportWidth
+		m.viewport.Height = viewportHeight
+	}
+	m.viewport.SetContent(m.renderActivePreview(viewportWidth))
 }
 
 func (m *Model) updateViewportPreview() {
-	m.viewport.SetContent(m.renderActivePreview(m.viewport.Width))
-	m.viewport.GotoTop()
+	if m.viewport.Width > 0 {
+		m.viewport.SetContent(m.renderActivePreview(m.viewport.Width))
+		m.viewport.GotoTop()
+	}
 }
 
 func (m Model) renderActivePreview(width int) string {
@@ -385,7 +374,7 @@ func (m Model) renderActivePreview(width int) string {
 	item := m.allItems[actualIdx]
 
 	if item.IsFolder {
-		return fmt.Sprintf("\n  📁 **Folder: %s**\n\n  Contains %d notes. Press [Enter] or click to toggle.",
+		return fmt.Sprintf("\n  📁 **Folder: %s**\n\n  Contains %d notes. Press [Enter] or click to toggle open/close.",
 			item.Title, len(item.ChildIDs))
 	}
 
@@ -393,11 +382,11 @@ func (m Model) renderActivePreview(width int) string {
 }
 
 func (m Model) View() string {
-	if !m.ready {
+	if !m.ready || m.width <= 0 || m.height <= 0 {
 		return "\n  Summoning Tome..."
 	}
 
-	// 1. Strict Height & Width Budgeting
+	// 1. Strict Grid Dimension Calculation
 	headerHeight := 2
 	footerHeight := 1
 	aiHeight := 0
@@ -406,30 +395,34 @@ func (m Model) View() string {
 	}
 	panesHeight := max(5, m.height-headerHeight-footerHeight-aiHeight)
 
-	leftWidth := max(24, min(36, m.width/3))
-	rightWidth := max(20, m.width-leftWidth-1)
+	leftTotalWidth := max(24, min(36, m.width/3))
+	rightTotalWidth := max(20, m.width-leftTotalWidth)
 
-	// 2. Render Header (Exactly 2 rows)
-	title := ui.BrandStyle.Render("📖 T O M E")
-	subtitle := ui.SubtitleStyle.Render(" The Arcane Terminal Notebook")
-	wsPill := ui.BadgeStyle.Render("Workspace: ~/Notes")
-	aiPill := ui.ActiveBadgeStyle.Render("✦ Cloud AI: Ready")
+	// 2. Artistic Header Banner with Smooth Multi-Color Gradient
+	titleGradient := ui.Gradient("❖  T O M E", "#FF4500", "#FFD166")
+	bannerLeft := fmt.Sprintf("✦ %s ❖ %s", titleGradient, ui.SubtitleStyle.Render("The Arcane Terminal Notebook"))
+	
+	wsBadge := ui.BadgeStyle.Render("󰉋 ~/Notes")
+	aiBadge := ui.ActiveBadgeStyle.Render("✦ Cloud AI: Online")
+	bannerRight := fmt.Sprintf("%s %s", wsBadge, aiBadge)
 
-	headerLeft := title + subtitle
-	headerRight := wsPill + " " + aiPill
-	spacing := max(1, m.width-lipgloss.Width(headerLeft)-lipgloss.Width(headerRight)-2)
-	headerRow1 := " " + headerLeft + strings.Repeat(" ", spacing) + headerRight
-	headerDivider := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("━", m.width))
-	headerBlock := lipgloss.JoinVertical(lipgloss.Left, headerRow1, headerDivider)
+	// Fill middle space exactly so header does not wrap
+	leftLen := lipgloss.Width(bannerLeft)
+	rightLen := lipgloss.Width(bannerRight)
+	gap := max(1, m.width-leftLen-rightLen-2)
+	row1 := " " + bannerLeft + strings.Repeat(" ", gap) + bannerRight
+	row2 := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", m.width))
+	headerBlock := lipgloss.JoinVertical(lipgloss.Left, row1, row2)
 
-	// 3. Render Tree Pane (Left)
+	// 3. Tree Pane (Left) - Subtle, Professional Highlight
 	var treeLines []string
+	innerLeftWidth := leftTotalWidth - 4 // Content width inside borders & padding
 	for i, visIdx := range m.visibleIndices {
 		item := m.allItems[visIdx]
 
-		prefix := "  "
+		treeBranch := ""
 		if item.Level > 0 {
-			prefix = "   ├─ "
+			treeBranch = "└─ "
 		}
 
 		icon := "󰈙 "
@@ -441,20 +434,31 @@ func (m Model) View() string {
 			}
 		}
 
-		lineText := prefix + icon + item.Title
-		availWidth := leftWidth - 4
-		if len(lineText) > availWidth && availWidth > 5 {
-			lineText = lineText[:availWidth-3] + "..."
+		// Text content (strictly truncated to prevent ANY wrapping)
+		rawTitle := treeBranch + icon + item.Title
+		maxTitleLen := innerLeftWidth - 3 // leave room for cursor indicator
+		if maxTitleLen < 5 {
+			maxTitleLen = 5
+		}
+		if len(rawTitle) > maxTitleLen {
+			rawTitle = rawTitle[:maxTitleLen-2] + "…"
 		}
 
 		if i == m.selectedIdx {
-			treeLines = append(treeLines, ui.TreeSelectedStyle.Render(fmt.Sprintf("%-*s", availWidth+2, lineText)))
+			// Subtle, calm indicator: Flame accent bar on left, crisp text with soft dark slate tint
+			cursor := ui.TreeCursor.Render("▌ ")
+			text := ui.TreeSelectedText.Render(fmt.Sprintf("%-*s", innerLeftWidth-2, rawTitle))
+			treeLines = append(treeLines, cursor+text)
 		} else {
+			// Unselected item: 2 spaces indent instead of cursor
+			indent := "  "
+			var text string
 			if item.IsFolder {
-				treeLines = append(treeLines, ui.TreeFolderStyle.Render(lineText))
+				text = ui.TreeNormalFolder.Render(rawTitle)
 			} else {
-				treeLines = append(treeLines, ui.TreeItemStyle.Render(lineText))
+				text = ui.TreeNormalItem.Render(rawTitle)
 			}
+			treeLines = append(treeLines, indent+text)
 		}
 	}
 
@@ -463,24 +467,24 @@ func (m Model) View() string {
 		leftStyle = ui.ActivePaneStyle
 	}
 	leftView := leftStyle.
-		Width(leftWidth - 2).
+		Width(leftTotalWidth - 4).
 		Height(panesHeight - 2).
 		Render(strings.Join(treeLines, "\n"))
 
-	// 4. Render Preview Pane (Right)
+	// 4. Preview Pane (Right)
 	rightStyle := ui.PaneStyle
 	if m.activePane == 1 {
 		rightStyle = ui.ActivePaneStyle
 	}
 	rightView := rightStyle.
-		Width(rightWidth - 2).
+		Width(rightTotalWidth - 4).
 		Height(panesHeight - 2).
 		Render(m.viewport.View())
 
-	// Join Panes horizontally
+	// Horizontal side-by-side join (exactly equals m.width)
 	panesView := lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
 
-	// 5. Render AI Drawer (if open)
+	// 5. AI Research Drawer (if active)
 	var aiView string
 	if m.aiOpen {
 		statusIndicator := "✦ TOME AI RESEARCHER (Headless Cloud) ─ [Streaming...]"
@@ -492,22 +496,24 @@ func (m Model) View() string {
 			Foreground(ui.ColorAmberGold).
 			Render(statusIndicator)
 
-		bodyText := m.aiResponse
 		aiView = ui.AIDrawerStyle.
 			Width(m.width - 4).
 			Height(aiHeight - 2).
-			Render(titleBar + "\n" + bodyText)
+			Render(titleBar + "\n" + m.aiResponse)
 	}
 
-	// 6. Render Footer (Exactly 1 row)
-	kNav := ui.FooterKeyStyle.Render("[↑/↓/W/S]") + ui.FooterDescStyle.Render(" Move  ")
+	// 6. Clean 1-Row Footer
+	kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Navigate  ")
 	kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Toggle Folder  ")
-	kAi  := ui.FooterKeyStyle.Render("[A]") + ui.FooterDescStyle.Render(" Cloud AI  ")
+	kAi := ui.FooterKeyStyle.Render("[A]") + ui.FooterDescStyle.Render(" Cloud AI  ")
 	kTab := ui.FooterKeyStyle.Render("[Tab]") + ui.FooterDescStyle.Render(" Switch Pane  ")
-	kQuit:= ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
+	kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
 	footer := " " + kNav + kExp + kAi + kTab + kQuit
+	if len(footer) > m.width {
+		footer = footer[:m.width]
+	}
 
-	// 7. Strict Composition: Stack strictly to terminal height
+	// 7. Strict Composition: Exactly fills the terminal frame
 	var fullScreen string
 	if m.aiOpen {
 		fullScreen = lipgloss.JoinVertical(lipgloss.Left, headerBlock, panesView, aiView, footer)

@@ -2,21 +2,26 @@ package ui
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Palette defines our primary color tokens (Tome's Arcane Flame & Slate Theme)
+// Palette tokens (Tome's Arcane Flame & Slate Theme)
 var (
+	ColorFlameDeep    = lipgloss.Color("#E64A19")
 	ColorFlameOrange  = lipgloss.Color("#FF7A00")
 	ColorAmberGold    = lipgloss.Color("#FFAF00")
-	ColorGoldHighlight= lipgloss.Color("#FFD166")
-	ColorDarkSlate    = lipgloss.Color("#181920")
-	ColorPanelBg      = lipgloss.Color("#1E2029")
-	ColorBorderMuted  = lipgloss.Color("#383C4A")
+	ColorGoldGlow     = lipgloss.Color("#FFD166")
+	ColorDarkSlate    = lipgloss.Color("#13141C")
+	ColorPanelBg      = lipgloss.Color("#181A24")
+	ColorSelectBg     = lipgloss.Color("#252836") // Soft, subtle slate for selection
+	ColorBorderMuted  = lipgloss.Color("#2E3244")
+	ColorBorderActive = lipgloss.Color("#FF7A00")
 	ColorTextMuted    = lipgloss.Color("#6C7086")
-	ColorTextRegular  = lipgloss.Color("#D9E0EE")
-	ColorTextBright   = lipgloss.Color("#F5F5F7")
+	ColorTextRegular  = lipgloss.Color("#BAC2DE")
+	ColorTextBright   = lipgloss.Color("#FFFFFF")
 	ColorCyan         = lipgloss.Color("#89DCEB")
 	ColorGreen        = lipgloss.Color("#A6E3A1")
 	ColorRed          = lipgloss.Color("#F38BA8")
@@ -25,27 +30,22 @@ var (
 
 // UI Element Styles
 var (
-	// Brand Title
-	BrandStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(ColorFlameOrange)
-
 	SubtitleStyle = lipgloss.NewStyle().
-			Foreground(ColorAmberGold).
+			Foreground(ColorTextMuted).
 			Italic(true)
 
 	BadgeStyle = lipgloss.NewStyle().
-			Foreground(ColorTextBright).
-			Background(ColorBorderMuted).
+			Foreground(ColorTextMuted).
+			Background(ColorSelectBg).
 			Padding(0, 1)
 
 	ActiveBadgeStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#000000")).
-				Background(ColorAmberGold).
+				Foreground(ColorGoldGlow).
+				Background(ColorSelectBg).
 				Bold(true).
 				Padding(0, 1)
 
-	// Panes
+	// Panes: 1 border + 1 padding each side = 4 total horizontal overhead
 	PaneStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorBorderMuted).
@@ -56,22 +56,27 @@ var (
 			BorderForeground(ColorFlameOrange).
 			Padding(0, 1)
 
-	// Tree Items
-	TreeItemStyle = lipgloss.NewStyle().
+	// Tree Items: Elegant, calm, and subtle
+	TreeNormalItem = lipgloss.NewStyle().
 			Foreground(ColorTextRegular)
 
-	TreeFolderStyle = lipgloss.NewStyle().
-			Foreground(ColorAmberGold).
+	TreeNormalFolder = lipgloss.NewStyle().
+				Foreground(ColorAmberGold).
+				Bold(true)
+
+	// Selected: subtle left accent bar, soft dark slate highlight, bright text
+	TreeCursor = lipgloss.NewStyle().
+			Foreground(ColorFlameOrange).
 			Bold(true)
 
-	TreeSelectedStyle = lipgloss.NewStyle().
-				Background(ColorFlameOrange).
-				Foreground(lipgloss.Color("#000000")).
+	TreeSelectedText = lipgloss.NewStyle().
+				Foreground(ColorTextBright).
+				Background(ColorSelectBg).
 				Bold(true)
 
 	// AI Drawer
 	AIDrawerStyle = lipgloss.NewStyle().
-			Border(lipgloss.DoubleBorder()).
+			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorAmberGold).
 			Background(ColorDarkSlate).
 			Padding(0, 1)
@@ -85,8 +90,43 @@ var (
 			Foreground(ColorTextMuted)
 )
 
-// RenderGradientText returns text smoothly interpolated between two RGB colors
-func RenderGradientText(text string, startHex, endHex string) string {
-	// For simplicity in terminal, if text is short, lipgloss supports truecolor
-	return fmt.Sprintf("%s", BrandStyle.Render(text))
+// HexToRGB parses a "#RRGGBB" hex string into r, g, b components
+func HexToRGB(hex string) (uint8, uint8, uint8) {
+	if len(hex) > 0 && hex[0] == '#' {
+		hex = hex[1:]
+	}
+	if len(hex) != 6 {
+		return 255, 255, 255
+	}
+	val, err := strconv.ParseUint(hex, 16, 32)
+	if err != nil {
+		return 255, 255, 255
+	}
+	return uint8((val >> 16) & 0xFF), uint8((val >> 8) & 0xFF), uint8(val & 0xFF)
+}
+
+// Gradient creates a smooth character-by-character color gradient
+func Gradient(text string, fromHex, toHex string) string {
+	runes := []rune(text)
+	n := len(runes)
+	if n == 0 {
+		return ""
+	}
+	if n == 1 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(fromHex)).Render(text)
+	}
+
+	r1, g1, b1 := HexToRGB(fromHex)
+	r2, g2, b2 := HexToRGB(toHex)
+
+	var result string
+	for i, r := range runes {
+		ratio := float64(i) / float64(n-1)
+		curR := uint8(math.Round(float64(r1) + ratio*(float64(r2)-float64(r1))))
+		curG := uint8(math.Round(float64(g1) + ratio*(float64(g2)-float64(g1))))
+		curB := uint8(math.Round(float64(b1) + ratio*(float64(b2)-float64(b1))))
+		hexColor := fmt.Sprintf("#%02X%02X%02X", curR, curG, curB)
+		result += lipgloss.NewStyle().Foreground(lipgloss.Color(hexColor)).Render(string(r))
+	}
+	return result
 }
