@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -59,6 +60,13 @@ type Model struct {
 	targetHeight int
 	sliding      bool
 	slideDir     int // +1 opening, -1 closing
+
+	// Formatting Cheat Sheet Drawer
+	cheatSheetOpen bool
+	cheatSliding   bool
+	cheatSlideDir  int // +1 opening, -1 closing
+	cheatHeight    int
+	cheatTargetH   int
 
 	statusMsg string
 }
@@ -134,6 +142,7 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 	ta.CharLimit = 0
 	ta.MaxHeight = 0 // Unlimited lines: allows Enter to insert newlines regardless of note length
 	ta.EndOfBufferCharacter = ' '
+	ta.Cursor.SetMode(cursor.CursorStatic)
 
 	// Theme-matched styling with NO background color (prevents adaptive light-mode white highlighting!)
 	editorStyle := textarea.Style{
@@ -295,6 +304,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.cheatSliding {
+			if m.cheatSlideDir > 0 {
+				m.cheatHeight += 4
+				if m.cheatHeight >= m.cheatTargetH {
+					m.cheatHeight = m.cheatTargetH
+					m.cheatSliding = false
+				} else {
+					cmds = append(cmds, slideTick())
+				}
+			} else {
+				m.cheatHeight -= 4
+				if m.cheatHeight <= 0 {
+					m.cheatHeight = 0
+					m.cheatSliding = false
+					m.cheatSheetOpen = false
+				} else {
+					cmds = append(cmds, slideTick())
+				}
+			}
+		}
+
 	case animTickMsg:
 		if m.aiState == "thinking" {
 			m.aiAnimStep++
@@ -350,7 +380,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// When in in-place note editor mode, route keys directly to editor
 		if m.inEditMode {
+			// If cheat sheet drawer is open, check keys
+			if m.cheatSheetOpen && !m.cheatSliding {
+				switch msg.String() {
+				case "ctrl+/", "ctrl+_", "f1", "esc":
+					m.cheatSliding = true
+					m.cheatSlideDir = -1
+					return m, slideTick()
+				default:
+					// Dismiss cheat sheet drawer and pass key directly to editor
+					m.cheatSliding = true
+					m.cheatSlideDir = -1
+					var cmd tea.Cmd
+					m.editor, cmd = m.editor.Update(msg)
+					if m.saveStatus != "" {
+						m.saveStatus = "● Modified"
+					}
+					return m, tea.Batch(cmd, slideTick())
+				}
+			}
+
 			switch msg.String() {
+			case "ctrl+/", "ctrl+_", "f1":
+				m.cheatSheetOpen = true
+				m.cheatSliding = true
+				m.cheatSlideDir = 1
+				m.cheatHeight = 4
+				m.cheatTargetH = min(18, max(14, int(float64(m.height)*0.60)))
+				return m, slideTick()
+
 			case "ctrl+s":
 				_ = os.WriteFile(m.activeNotePath, []byte(m.editor.Value()), 0644)
 				m.saveStatus = "✓ Saved"
@@ -362,6 +420,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inEditMode = false
 				m.saveStatus = ""
 				m.editor.Blur()
+				m.cheatSheetOpen = false
+				m.cheatSliding = false
+				m.cheatHeight = 0
 				m.updateViewportPreview()
 				return m, nil
 
@@ -369,6 +430,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inEditMode = false
 				m.saveStatus = ""
 				m.editor.Blur()
+				m.cheatSheetOpen = false
+				m.cheatSliding = false
+				m.cheatHeight = 0
 				m.updateViewportPreview()
 				return m, nil
 			}
@@ -379,6 +443,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.saveStatus = "● Modified"
 			}
 			return m, cmd
+		}
+
+		// When cheat sheet drawer is open in preview mode, route keys to dismiss it
+		if m.cheatSheetOpen && !m.cheatSliding {
+			m.cheatSliding = true
+			m.cheatSlideDir = -1
+			return m, slideTick()
 		}
 
 		// When AI drawer is open, route keys to the assistant
@@ -544,6 +615,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.targetHeight = max(12, int(float64(m.height)*0.65))
 			m.aiInput.Width = max(20, m.width-12)
 			return m, slideTick()
+
+		case "ctrl+/", "ctrl+_", "f1", "?":
+			m.cheatSheetOpen = true
+			m.cheatSliding = true
+			m.cheatSlideDir = 1
+			m.cheatHeight = 4
+			m.cheatTargetH = min(18, max(14, int(float64(m.height)*0.60)))
+			return m, slideTick()
 		}
 
 	case tea.MouseMsg:
@@ -551,23 +630,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Clicking mouse while cheat sheet is open dismisses it
+		if m.cheatSheetOpen && !m.cheatSliding {
+			m.cheatSliding = true
+			m.cheatSlideDir = -1
+			return m, slideTick()
+		}
+
 		usableWidth := max(20, m.width-2)
 		leftTotalWidth := max(34, min(52, usableWidth*36/100))
 
 		if m.inEditMode {
-			// Translate screen coordinates to local editor coordinates:
-			// X: right pane starts at leftTotalWidth; 1 col border + 1 col padding = +2
-			// Y: 2 header banner rows + 1 top border row + 1 editor title row = 4 rows
-			editorX := msg.X - (leftTotalWidth + 2)
-			editorY := msg.Y - 4
+			switch msg.Type {
+			case tea.MouseWheelUp:
+				for i := 0; i < 3; i++ {
+					m.editor.CursorUp()
+				}
+				return m, nil
 
-			if editorX >= 0 && editorY >= 0 && editorX < m.editor.Width() && editorY < m.editor.Height() {
-				localMsg := msg
-				localMsg.X = editorX
-				localMsg.Y = editorY
-				var cmd tea.Cmd
-				m.editor, cmd = m.editor.Update(localMsg)
-				return m, cmd
+			case tea.MouseWheelDown:
+				for i := 0; i < 3; i++ {
+					m.editor.CursorDown()
+				}
+				return m, nil
+
+			case tea.MouseLeft:
+				// Translate screen coordinates to local editor coordinates:
+				// X: right pane starts at leftTotalWidth; 1 col border + 1 col padding = +2
+				// Y: 2 header banner rows + 1 top border row + 1 editor title row = 4 rows
+				editorX := msg.X - (leftTotalWidth + 2)
+				editorY := msg.Y - 4
+
+				if editorX >= 0 && editorY >= 0 && editorX < m.editor.Width() && editorY < m.editor.Height() {
+					handleEditorClick(&m.editor, editorX, editorY)
+					return m, nil
+				}
 			}
 			return m, nil
 		}
@@ -916,7 +1013,8 @@ func (m Model) View() string {
 	} else if m.inEditMode {
 		kSave := ui.FooterKeyStyle.Render("[Ctrl+S]") + ui.FooterDescStyle.Render(" Save  ")
 		kDone := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Save & Finish  ")
-		kDiscard := ui.FooterKeyStyle.Render("[Ctrl+Q]") + ui.FooterDescStyle.Render(" Discard")
+		kDiscard := ui.FooterKeyStyle.Render("[Ctrl+Q]") + ui.FooterDescStyle.Render(" Discard  ")
+		kCheat := ui.FooterKeyStyle.Render("[Ctrl+/]") + ui.FooterDescStyle.Render(" Cheat Sheet")
 		var saveBadge string
 		if m.saveStatus != "" {
 			if m.saveStatus == "✓ Saved" {
@@ -925,12 +1023,21 @@ func (m Model) View() string {
 				saveBadge = ui.BadgeStyle.Render(m.saveStatus) + "  "
 			}
 		}
-		footer = " ✎ In-Place Editor │ " + saveBadge + kSave + kDone + kDiscard
+		if m.cheatSheetOpen {
+			kCloseCheat := ui.FooterKeyStyle.Render("[Esc/Ctrl+/]") + ui.FooterDescStyle.Render(" Close Cheat Sheet  ")
+			footer = " ✦ Formatting Guide │ " + kCloseCheat + kSave + kDiscard
+		} else {
+			footer = " ✎ In-Place Editor │ " + saveBadge + kSave + kDone + kDiscard + kCheat
+		}
 	} else if m.aiOpen {
 		kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Ask AI  ")
 		kClose := ui.FooterKeyStyle.Render("[Esc/Ctrl+K]") + ui.FooterDescStyle.Render(" Close Assistant  ")
 		kQuit := ui.FooterKeyStyle.Render("[Ctrl+C]") + ui.FooterDescStyle.Render(" Quit")
 		footer = " " + kEnter + kClose + kQuit
+	} else if m.cheatSheetOpen {
+		kClose := ui.FooterKeyStyle.Render("[Esc/Ctrl+/]") + ui.FooterDescStyle.Render(" Close Cheat Sheet  ")
+		kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
+		footer = " ✦ Formatting Guide │ " + kClose + kQuit
 	} else {
 		kNav := ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  ")
 		kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  ")
@@ -938,9 +1045,10 @@ func (m Model) View() string {
 		kNew := ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New Note  ")
 		kFolder := ui.FooterKeyStyle.Render("[F]") + ui.FooterDescStyle.Render(" Folder  ")
 		kLog := ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  ")
+		kCheat := ui.FooterKeyStyle.Render("[Ctrl+/]") + ui.FooterDescStyle.Render(" Guide  ")
 		kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
 		kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
-		footer = " " + kNav + kExp + kEdit + kNew + kFolder + kLog + kAi + kQuit
+		footer = " " + kNav + kExp + kEdit + kNew + kFolder + kLog + kCheat + kAi + kQuit
 	}
 	if lipgloss.Width(footer) > usableWidth {
 		footer = footer[:usableWidth]
@@ -1017,6 +1125,74 @@ func (m Model) View() string {
 
 		footerRow := len(bgLines) - 1
 		startRow := footerRow - m.animHeight
+		if startRow < 2 {
+			startRow = 2
+		}
+
+		for i, dLine := range drawerLines {
+			targetRow := startRow + i
+			if targetRow >= 0 && targetRow < footerRow {
+				bgLines[targetRow] = dLine
+			}
+		}
+	}
+
+	// 7b. Layered Sliding Formatting Cheat Sheet Drawer
+	if m.cheatSheetOpen && m.cheatHeight > 0 {
+		drawerInnerWidth := usableWidth - 4
+		drawerContentHeight := max(2, m.cheatHeight - 2)
+
+		titlePrefix := "✦ FORMATTING CHEAT SHEET "
+		ruleLen := max(2, drawerInnerWidth-lipgloss.Width(titlePrefix)-2)
+		statusText := titlePrefix + strings.Repeat("─", ruleLen)
+		drawerTitle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ui.ColorFlameOrange).
+			Render(statusText)
+
+		content := renderCheatSheetContent(drawerInnerWidth)
+		drawerContent := fmt.Sprintf("%s\n\n%s", drawerTitle, content)
+
+		rawLines := strings.Split(drawerContent, "\n")
+		var clampedLines []string
+		innerContentWidth := max(10, drawerInnerWidth-2)
+
+		for idx, l := range rawLines {
+			if idx >= drawerContentHeight {
+				break
+			}
+			if lipgloss.Width(l) > innerContentWidth {
+				l = truncateWithDots(l, innerContentWidth)
+			}
+			pad := max(0, innerContentWidth-lipgloss.Width(l))
+			clampedLines = append(clampedLines, l+strings.Repeat(" ", pad))
+		}
+		for len(clampedLines) < drawerContentHeight {
+			clampedLines = append(clampedLines, strings.Repeat(" ", innerContentWidth))
+		}
+
+		cheatBoxStyle := lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(ui.ColorFlameOrange).
+			Background(ui.ColorDarkSlate).
+			Padding(0, 1)
+
+		cheatDrawerRendered := cheatBoxStyle.
+			Width(drawerInnerWidth).
+			Height(drawerContentHeight).
+			MaxHeight(m.cheatHeight).
+			Render(strings.Join(clampedLines, "\n"))
+
+		drawerLines := strings.Split(cheatDrawerRendered, "\n")
+		if len(drawerLines) > m.cheatHeight {
+			drawerLines = drawerLines[:m.cheatHeight]
+		}
+		for len(drawerLines) < m.cheatHeight {
+			drawerLines = append(drawerLines, strings.Repeat(" ", usableWidth))
+		}
+
+		footerRow := len(bgLines) - 1
+		startRow := footerRow - m.cheatHeight
 		if startRow < 2 {
 			startRow = 2
 		}
@@ -1349,4 +1525,98 @@ func (m *Model) confirmQuickLog() {
 	m.modalType = ""
 	m.modalInput.Blur()
 	m.updateViewportPreview()
+}
+
+// findCursorVisualRow scans the editor's rendered view to locate which visible row contains the cursor
+func findCursorVisualRow(ta *textarea.Model) int {
+	view := ta.View()
+	vLines := strings.Split(view, "\n")
+	for i, l := range vLines {
+		if strings.Contains(l, "\x1b[7;") || strings.Contains(l, "\x1b[7m") {
+			return i
+		}
+	}
+	return -1
+}
+
+// handleEditorClick translates a mouse click to the closest line and column in the editor
+func handleEditorClick(ta *textarea.Model, targetX, targetY int) {
+	if targetX < 0 {
+		targetX = 0
+	}
+	curVisualRow := findCursorVisualRow(ta)
+	if curVisualRow < 0 {
+		return
+	}
+
+	if targetY > curVisualRow {
+		for i := 0; i < targetY-curVisualRow; i++ {
+			ta.CursorDown()
+		}
+	} else if targetY < curVisualRow {
+		for i := 0; i < curVisualRow-targetY; i++ {
+			ta.CursorUp()
+		}
+	}
+
+	ta.SetCursor(targetX)
+}
+
+func padRight(s string, width int) string {
+	w := lipgloss.Width(s)
+	if w >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-w)
+}
+
+func renderCheatSheetContent(innerWidth int) string {
+	bStyle := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorTextBright)
+	iStyle := lipgloss.NewStyle().Italic(true).Foreground(ui.ColorAmberGold)
+	biStyle := lipgloss.NewStyle().Bold(true).Italic(true).Foreground(ui.ColorGoldGlow)
+	sStyle := lipgloss.NewStyle().Strikethrough(true).Foreground(ui.ColorTextMuted)
+	hStyle := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorFlameOrange)
+	uStyle := lipgloss.NewStyle().Underline(true).Foreground(ui.ColorTextBright)
+	cStyle := lipgloss.NewStyle().Foreground(ui.ColorCyan)
+	lStyle := lipgloss.NewStyle().Foreground(ui.ColorCyan).Underline(true)
+	gStyle := lipgloss.NewStyle().Foreground(ui.ColorGreen).Bold(true)
+	headStyle := lipgloss.NewStyle().Foreground(ui.ColorGoldGlow).Bold(true)
+	keyStyle := lipgloss.NewStyle().Foreground(ui.ColorAmberGold).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(ui.ColorTextMuted)
+
+	col1W := 26
+	col2W := 22
+
+	rows := [][]string{
+		{"**bold** or __bold__", bStyle.Render("bold"), "Bold text"},
+		{"*italic* or _italic_", iStyle.Render("italic"), "Italic text"},
+		{"***bold italic***", biStyle.Render("bold italic"), "Bold & Italic"},
+		{"~~strike~~", sStyle.Render("strike"), "Strikethrough"},
+		{"==highlight==", hStyle.Render("highlight"), "Flame highlight"},
+		{"<u>underline</u>", uStyle.Render("underline"), "Underline text"},
+		{"`code`", cStyle.Render("code"), "Inline code snippet"},
+		{"[[Link]] or [[Link|Alias]]", lStyle.Render("󰌹 Alias"), "Obsidian wiki-link"},
+		{"- [ ] / - [x]", gStyle.Render("○") + " / " + gStyle.Render("✔"), "Task checklist"},
+		{"- Item  (indent:   - )", ui.TreeCursor.Render("•") + " Item", "Nested bullet lists"},
+		{"# H1  ## H2  ### H3", headStyle.Render("Heading"), "Headings with rule"},
+		{"> [!NOTE] / [!TIP] / [!WARN]", cStyle.Render("▎ NOTE"), "Obsidian callout box"},
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("  %s %s %s\n",
+		padRight(keyStyle.Render("MARKDOWN SYNTAX"), col1W),
+		padRight(keyStyle.Render("PREVIEW"), col2W),
+		keyStyle.Render("DESCRIPTION")))
+
+	divLen := max(10, innerWidth-6)
+	sb.WriteString("  " + lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", divLen)) + "\n")
+
+	for _, r := range rows {
+		sb.WriteString(fmt.Sprintf("  %s %s %s\n",
+			padRight(r[0], col1W),
+			padRight(r[1], col2W),
+			descStyle.Render(r[2])))
+	}
+
+	return sb.String()
 }
