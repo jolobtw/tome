@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -30,6 +31,12 @@ type Model struct {
 	visibleIndices []int
 	selectedIdx    int
 	viewport       viewport.Model
+
+	// In-place Note Editor
+	inEditMode     bool
+	editor         textarea.Model
+	activeNotePath string
+	saveStatus     string
 
 	// Interactive AI Knowledge Assistant
 	aiOpen       bool
@@ -114,6 +121,19 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 	ti.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright)
 	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
 
+	ta := textarea.New()
+	ta.Placeholder = "Write your note here using Markdown..."
+	ta.ShowLineNumbers = false
+	ta.Prompt = ""
+	ta.CharLimit = 0
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.LineNumber = lipgloss.NewStyle().Foreground(ui.ColorTextMuted)
+	ta.FocusedStyle.CursorLineNumber = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Bold(true)
+	ta.FocusedStyle.Text = lipgloss.NewStyle().Foreground(ui.ColorTextRegular)
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(ui.ColorAmberGold)
+	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle().Foreground(ui.ColorBorderMuted)
+	ta.Cursor.Style = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange)
+
 	m := Model{
 		config:        cfg,
 		workspacePath: workspacePath,
@@ -122,6 +142,7 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 		allNodes:      allNodes,
 		selectedIdx:   0,
 		activePane:    0,
+		editor:        ta,
 		aiInput:       ti,
 		aiState:       "idle",
 		statusMsg:     "Welcome to Tome • Press [Ctrl+K] for Cloud AI Assistant",
@@ -273,6 +294,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		// When in in-place note editor mode, route keys directly to editor
+		if m.inEditMode {
+			switch msg.String() {
+			case "ctrl+s":
+				_ = os.WriteFile(m.activeNotePath, []byte(m.editor.Value()), 0644)
+				m.saveStatus = "✓ Saved"
+				m.updateViewportPreview()
+				return m, nil
+
+			case "esc":
+				_ = os.WriteFile(m.activeNotePath, []byte(m.editor.Value()), 0644)
+				m.inEditMode = false
+				m.saveStatus = ""
+				m.editor.Blur()
+				m.updateViewportPreview()
+				return m, nil
+
+			case "ctrl+q":
+				m.inEditMode = false
+				m.saveStatus = ""
+				m.editor.Blur()
+				m.updateViewportPreview()
+				return m, nil
+			}
+
+			var cmd tea.Cmd
+			m.editor, cmd = m.editor.Update(msg)
+			if m.saveStatus != "" {
+				m.saveStatus = "● Modified"
+			}
+			return m, cmd
+		}
+
 		// When AI drawer is open, route keys to the assistant
 		if m.aiOpen && !m.sliding {
 			switch msg.String() {
@@ -387,6 +441,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case "e":
+			// Enter in-place editor mode if selected item is a note
+			if m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
+				actualID := m.visibleIndices[m.selectedIdx]
+				var current *notes.Node
+				for idx := range m.allNodes {
+					if m.allNodes[idx].ID == actualID {
+						current = &m.allNodes[idx]
+						break
+					}
+				}
+				if current != nil && !current.IsFolder {
+					rawContent, err := notes.ReadNoteContent(current.Path)
+					if err == nil {
+						m.inEditMode = true
+						m.activePane = 1
+						m.activeNotePath = current.Path
+						m.saveStatus = ""
+						m.editor.SetValue(rawContent)
+						cmd := m.editor.Focus()
+						return m, cmd
+					}
+				}
+			}
+
 		case "ctrl+k":
 			m.aiOpen = true
 			m.sliding = true
@@ -400,6 +479,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if m.aiOpen {
 			return m, nil
+		}
+
+		if m.inEditMode {
+			var cmd tea.Cmd
+			m.editor, cmd = m.editor.Update(msg)
+			return m, cmd
 		}
 
 		usableWidth := max(20, m.width-2)
@@ -447,9 +532,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	var cmd tea.Cmd
-	m.viewport, cmd = m.viewport.Update(msg)
-	cmds = append(cmds, cmd)
+	if m.inEditMode {
+		var editorCmd tea.Cmd
+		m.editor, editorCmd = m.editor.Update(msg)
+		cmds = append(cmds, editorCmd)
+	} else {
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 
 	return m, tea.Batch(cmds...)
 }
@@ -476,6 +567,8 @@ func (m *Model) recalculateViewport() {
 		m.viewport.Width = viewportWidth
 		m.viewport.Height = viewportHeight
 	}
+	m.editor.SetWidth(viewportWidth)
+	m.editor.SetHeight(viewportHeight)
 	m.viewport.SetContent(m.renderActivePreview(viewportWidth))
 }
 
@@ -679,22 +772,49 @@ func (m Model) View() string {
 		Height(panesContentHeight).
 		Render(strings.Join(treeLines, "\n"))
 
-	// 3. Preview Pane (Right)
+	// 3. Preview/Editor Pane (Right)
 	rightStyle := ui.PaneStyle
-	if m.activePane == 1 {
+	if m.inEditMode {
+		rightStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ui.ColorFlameOrange).
+			Background(ui.ColorDarkSlate).
+			Padding(0, 1)
+	} else if m.activePane == 1 {
 		rightStyle = ui.ActivePaneStyle
 	}
+
+	var rightContent string
+	if m.inEditMode {
+		rightContent = m.editor.View()
+	} else {
+		rightContent = m.viewport.View()
+	}
+
 	rightView := rightStyle.
 		Width(rightTotalWidth - 4).
 		Height(panesContentHeight).
-		Render(m.viewport.View())
+		Render(rightContent)
 
 	// 4. Combine Full Background (Undisturbed!)
 	panesView := lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
 
 	// 5. Footer Bar
 	var footer string
-	if m.aiOpen {
+	if m.inEditMode {
+		kSave := ui.FooterKeyStyle.Render("[Ctrl+S]") + ui.FooterDescStyle.Render(" Save  ")
+		kDone := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Save & Finish  ")
+		kDiscard := ui.FooterKeyStyle.Render("[Ctrl+Q]") + ui.FooterDescStyle.Render(" Discard")
+		var saveBadge string
+		if m.saveStatus != "" {
+			if m.saveStatus == "✓ Saved" {
+				saveBadge = ui.ActiveBadgeStyle.Render(m.saveStatus) + "  "
+			} else {
+				saveBadge = ui.BadgeStyle.Render(m.saveStatus) + "  "
+			}
+		}
+		footer = " ✎ In-Place Editor │ " + saveBadge + kSave + kDone + kDiscard
+	} else if m.aiOpen {
 		kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Ask AI  ")
 		kClose := ui.FooterKeyStyle.Render("[Esc/Ctrl+K]") + ui.FooterDescStyle.Render(" Close Assistant  ")
 		kQuit := ui.FooterKeyStyle.Render("[Ctrl+C]") + ui.FooterDescStyle.Render(" Quit")
@@ -702,10 +822,11 @@ func (m Model) View() string {
 	} else {
 		kNav := ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  ")
 		kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  ")
+		kEdit := ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit Note  ")
 		kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
 		kTab := ui.FooterKeyStyle.Render("[Tab]") + ui.FooterDescStyle.Render(" Switch Pane  ")
 		kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
-		footer = " " + kNav + kExp + kAi + kTab + kQuit
+		footer = " " + kNav + kExp + kEdit + kAi + kTab + kQuit
 	}
 	if lipgloss.Width(footer) > usableWidth {
 		footer = footer[:usableWidth]
