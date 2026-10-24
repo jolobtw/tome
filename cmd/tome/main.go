@@ -523,11 +523,27 @@ func (m Model) View() string {
 			Foreground(ui.ColorAmberGold).
 			Render(statusIndicator)
 
-		aiContentHeight := max(2, aiHeight-2)
+		aiContentHeight := max(4, aiHeight-2)
+		innerAIWidth := usableWidth - 4
+
+		// Format AI response lines strictly so they fit inside drawer height without wrapping
+		rawContent := titleBar + "\n" + m.aiResponse
+		aiLines := strings.Split(rawContent, "\n")
+		if len(aiLines) > aiContentHeight {
+			aiLines = aiLines[:aiContentHeight]
+		}
+		for idx, line := range aiLines {
+			if lipgloss.Width(line) > innerAIWidth {
+				aiLines[idx] = truncateWithDots(line, innerAIWidth)
+			}
+		}
+		clampedAIContent := strings.Join(aiLines, "\n")
+
 		aiView = ui.AIDrawerStyle.
-			Width(usableWidth - 4).
+			Width(innerAIWidth).
 			Height(aiContentHeight).
-			Render(titleBar + "\n" + m.aiResponse)
+			MaxHeight(aiHeight).
+			Render(clampedAIContent)
 	}
 
 	// 6. 1-Row Footer (Affixed to the bottom of the screen)
