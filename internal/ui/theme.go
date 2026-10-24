@@ -30,6 +30,10 @@ var (
 
 // UI Element Styles
 var (
+	BrandStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ColorFlameOrange)
+
 	SubtitleStyle = lipgloss.NewStyle().
 			Foreground(ColorTextMuted).
 			Italic(true)

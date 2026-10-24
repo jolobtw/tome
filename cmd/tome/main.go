@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,28 +13,20 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"tome/internal/markdown"
+	"tome/internal/notes"
 	"tome/internal/ui"
 )
-
-// Item represents a node in the tree (folder or note)
-type Item struct {
-	ID       int
-	Title    string
-	Path     string
-	IsFolder bool
-	Expanded bool
-	Level    int
-	Content  string
-	ChildIDs []int
-	ParentID int
-}
 
 type Model struct {
 	width          int
 	height         int
 	ready          bool
 	activePane     int // 0: Tree, 1: Preview
-	allItems       []Item
+	config         notes.Config
+	workspacePath  string
+	workspaceName  string
+	isObsidian     bool
+	allNodes       []notes.Node
 	visibleIndices []int
 	selectedIdx    int
 	viewport       viewport.Model
@@ -88,112 +82,29 @@ var arcaneSpinners = []string{
 	"❖ ✦ ❖ ✦",
 }
 
-func sampleData() []Item {
-	return []Item{
-		{
-			ID:       0,
-			Title:    "Grimoire",
-			IsFolder: true,
-			Expanded: true,
-			Level:    0,
-			ParentID: -1,
-			ChildIDs: []int{1, 2},
-		},
-		{
-			ID:       1,
-			Title:    "The Arcane Architecture.md",
-			IsFolder: false,
-			Level:    1,
-			ParentID: 0,
-			Content: `# The Arcane Architecture 📖
-
-> [!NOTE]
-> Tome combines raw compiled terminal speed with Obsidian-grade aesthetics.
-
-### Guiding Principles
-- [x] Zero external dependencies at runtime.
-- [x] Strict viewport bounding: no screen jumps or off-screen overflows.
-- [x] Yazi-inspired mouse hover responsiveness.
-- [ ] Direct cloud AI research stream.
-
-### Visual Foundations
-We use 24-bit TrueColor ANSI styling with crisp 90° box borders and subtle slate backgrounds.
-
-~~~go
-func Launch() error {
-    // Zero-overhead compiled startup in <10ms
-    return tea.NewProgram(tomeModel).Run()
-}
-~~~
-
-Refer to [[Cross-Platform Sync]] for multi-machine workflows.`,
-		},
-		{
-			ID:       2,
-			Title:    "Color Palette & Glyphs.md",
-			IsFolder: false,
-			Level:    1,
-			ParentID: 0,
-			Content: `# Color Palette & Glyphs 🎨
-
-### The Arcane Flame Theme
-- **Flame Orange** (#FF7A00): Primary accent, titles, and active pane borders.
-- **Amber Gold** (#FFAF00): Subtitles, folder glyphs, and warnings.
-- **Dark Slate** (#181920): Card background and terminal panels.
-
-> [!TIP]
-> Ensure a Nerd Font (such as FiraCode NF or MesloLGS NF) is active in your terminal for crisp folder icons.`,
-		},
-		{
-			ID:       3,
-			Title:    "Codex",
-			IsFolder: true,
-			Expanded: true,
-			Level:    0,
-			ParentID: -1,
-			ChildIDs: []int{4},
-		},
-		{
-			ID:       4,
-			Title:    "Cross-Platform Sync.md",
-			IsFolder: false,
-			Level:    1,
-			ParentID: 3,
-			Content: `# Cross-Platform Sync: PC & MacBook 🚀
-
-> [!IMPORTANT]
-> Keep your personal Windows PC and work MacBook synchronized effortlessly via GitLab CI/CD.
-
-### The Automated Workflow
-1. **Push from Home PC:** Run 'git push' after adding features or tweaking your layout.
-2. **GitLab Cloud Runner:** Automatically cross-compiles both Windows ('tome.exe') and macOS ('tome-darwin-arm64').
-3. **One-Line Pull on Mac:** Grab the binary directly without needing developer tools installed on your work laptop.`,
-		},
-		{
-			ID:       5,
-			Title:    "Journal",
-			IsFolder: true,
-			Expanded: false,
-			Level:    0,
-			ParentID: -1,
-			ChildIDs: []int{6},
-		},
-		{
-			ID:       6,
-			Title:    "2026-10-24 Daily Reflection.md",
-			IsFolder: false,
-			Level:    1,
-			ParentID: 5,
-			Content: `# 2026-10-24 Daily Reflection ☕
-
-Decided on the name **Tome**. 
-Designing the sliding AI research assistant drawer with smooth overlay mechanics.`,
-		},
-	}
-}
-
 func initialModel() Model {
-	items := sampleData()
+	cfg := notes.LoadConfig()
+	workspacePath := cfg.ActiveNotebook
+	workspaceName := filepath.Base(workspacePath)
+
+	allNodes, isObsidian, _ := notes.ScanTree(workspacePath, cfg.SortMode)
+
+	// If workspace is completely empty, provide an initial welcome note
+	if len(allNodes) == 0 {
+		welcomePath := filepath.Join(workspacePath, "Welcome to Tome.md")
+		welcomeContent := `# Welcome to Tome 📖
+
+Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
+
+### Getting Started
+- Press **[N]** to create your first note.
+- Press **[F]** to create a folder.
+- Press **[Ctrl+K]** to summon your AI knowledge researcher.
+- Edit notes in your preferred editor with **[E]**.
+`
+		_ = os.WriteFile(welcomePath, []byte(welcomeContent), 0644)
+		allNodes, isObsidian, _ = notes.ScanTree(workspacePath, cfg.SortMode)
+	}
 
 	ti := textinput.New()
 	ti.Placeholder = "Ask about your notes... (e.g. 'What did we decide on sync?')"
@@ -204,33 +115,49 @@ func initialModel() Model {
 	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
 
 	m := Model{
-		allItems:    items,
-		selectedIdx: 1,
-		activePane:  0,
-		aiInput:     ti,
-		aiState:     "idle",
-		statusMsg:   "Welcome to Tome • Press [Ctrl+K] for Cloud AI Assistant",
+		config:        cfg,
+		workspacePath: workspacePath,
+		workspaceName: workspaceName,
+		isObsidian:    isObsidian,
+		allNodes:      allNodes,
+		selectedIdx:   0,
+		activePane:    0,
+		aiInput:       ti,
+		aiState:       "idle",
+		statusMsg:     "Welcome to Tome • Press [Ctrl+K] for Cloud AI Assistant",
 	}
+
+	// Auto-select first note if available
 	m.rebuildVisible()
+	for i, nodeID := range m.visibleIndices {
+		for _, n := range m.allNodes {
+			if n.ID == nodeID && !n.IsFolder {
+				m.selectedIdx = i
+				break
+			}
+		}
+	}
+
 	return m
 }
 
+// rebuildVisible computes the flat visible list of nodes based on which folders are expanded
 func (m *Model) rebuildVisible() {
 	var visible []int
-	for i, it := range m.allItems {
-		if it.Level == 0 {
-			visible = append(visible, i)
-			if it.IsFolder && it.Expanded {
-				for _, childID := range it.ChildIDs {
-					for ci, candidate := range m.allItems {
-						if candidate.ID == childID {
-							visible = append(visible, ci)
-						}
-					}
+	var addChildren func(parentID int)
+
+	addChildren = func(parentID int) {
+		for _, n := range m.allNodes {
+			if n.ParentID == parentID {
+				visible = append(visible, n.ID)
+				if n.IsFolder && n.Expanded {
+					addChildren(n.ID)
 				}
 			}
 		}
 	}
+
+	addChildren(-1)
 	m.visibleIndices = visible
 	if m.selectedIdx >= len(m.visibleIndices) {
 		m.selectedIdx = max(0, len(m.visibleIndices)-1)
@@ -256,7 +183,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case slideTickMsg:
 		if m.sliding {
 			if m.slideDir > 0 {
-				// Sliding UP
 				m.animHeight += 4
 				if m.animHeight >= m.targetHeight {
 					m.animHeight = m.targetHeight
@@ -266,7 +192,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, slideTick())
 				}
 			} else {
-				// Sliding DOWN
 				m.animHeight -= 4
 				if m.animHeight <= 0 {
 					m.animHeight = 0
@@ -279,7 +204,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	// Arcane Rune/Ember Spinner Tick
 	case animTickMsg:
 		if m.aiState == "thinking" {
 			m.aiAnimStep++
@@ -303,11 +227,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		// If AI drawer is open, key events are captured by the AI drawer
+		// When AI drawer is open, route keys to the assistant
 		if m.aiOpen && !m.sliding {
 			switch msg.String() {
 			case "esc", "ctrl+k":
-				// Start slide-down close
 				m.sliding = true
 				m.slideDir = -1
 				return m, slideTick()
@@ -321,10 +244,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.aiAnimStep = 0
 					m.aiInput.SetValue("")
 
-					// Build smart contextual response tokens based on query
-					m.aiStreamList = buildAIResponse(query)
+					m.aiStreamList = buildAIResponse(query, m.allNodes)
 
-					// Trigger thinking spinner and delay streaming start by 500ms
 					cmds = append(cmds, animTick(), tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
 						return aiStartStreamMsg{}
 					}))
@@ -332,14 +253,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			// Forward typing to text input
 			var tiCmd tea.Cmd
 			m.aiInput, tiCmd = m.aiInput.Update(msg)
 			cmds = append(cmds, tiCmd)
 			return m, tea.Batch(cmds...)
 		}
 
-		// Main navigation keys (when AI drawer is closed)
+		// Main navigation keys
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -361,15 +281,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter", "space":
 			if m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
-				actualIdx := m.visibleIndices[m.selectedIdx]
-				if m.allItems[actualIdx].IsFolder {
-					m.allItems[actualIdx].Expanded = !m.allItems[actualIdx].Expanded
-					m.rebuildVisible()
+				actualID := m.visibleIndices[m.selectedIdx]
+				for idx := range m.allNodes {
+					if m.allNodes[idx].ID == actualID && m.allNodes[idx].IsFolder {
+						m.allNodes[idx].Expanded = !m.allNodes[idx].Expanded
+						m.rebuildVisible()
+						m.updateViewportPreview()
+						break
+					}
 				}
 			}
 
 		case "ctrl+k":
-			// Open AI drawer with slide-up animation
 			m.aiOpen = true
 			m.sliding = true
 			m.slideDir = 1
@@ -381,7 +304,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		if m.aiOpen {
-			// Don't scroll background when drawer is open
 			return m, nil
 		}
 
@@ -413,10 +335,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			clickedRow := msg.Y - 3
 			if msg.X < leftTotalWidth && clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
 				if m.selectedIdx == clickedRow {
-					actualIdx := m.visibleIndices[clickedRow]
-					if m.allItems[actualIdx].IsFolder {
-						m.allItems[actualIdx].Expanded = !m.allItems[actualIdx].Expanded
-						m.rebuildVisible()
+					actualID := m.visibleIndices[clickedRow]
+					for idx := range m.allNodes {
+						if m.allNodes[idx].ID == actualID && m.allNodes[idx].IsFolder {
+							m.allNodes[idx].Expanded = !m.allNodes[idx].Expanded
+							m.rebuildVisible()
+							m.updateViewportPreview()
+							break
+						}
 					}
 				} else {
 					m.selectedIdx = clickedRow
@@ -440,7 +366,6 @@ func (m *Model) recalculateViewport() {
 
 	headerHeight := 2
 	footerHeight := 1
-	// The background always renders at FULL height (no squishing!)
 	panesHeight := max(4, m.height-headerHeight-footerHeight)
 
 	usableWidth := max(20, m.width-2)
@@ -470,15 +395,37 @@ func (m Model) renderActivePreview(width int) string {
 	if m.selectedIdx < 0 || m.selectedIdx >= len(m.visibleIndices) {
 		return "Select a note to preview."
 	}
-	actualIdx := m.visibleIndices[m.selectedIdx]
-	item := m.allItems[actualIdx]
-
-	if item.IsFolder {
-		return fmt.Sprintf("\n  📁 **Folder: %s**\n\n  Contains %d notes. Press [Enter] or click to toggle open/close.",
-			item.Title, len(item.ChildIDs))
+	actualID := m.visibleIndices[m.selectedIdx]
+	var item *notes.Node
+	for i := range m.allNodes {
+		if m.allNodes[i].ID == actualID {
+			item = &m.allNodes[i]
+			break
+		}
+	}
+	if item == nil {
+		return "Select a note to preview."
 	}
 
-	return markdown.RenderDocument(item.Content, width)
+	// Folder Overview Card
+	if item.IsFolder {
+		status := "Collapsed (Press [Enter] to expand)"
+		if item.Expanded {
+			status = "Expanded (Press [Enter] to collapse)"
+		}
+		title := ui.BrandStyle.Render("📁 " + item.Title)
+		info := fmt.Sprintf("\n  %s\n\n  • **Path:** `%s`\n  • **Notes Contained:** %d\n  • **State:** %s\n\n  Press **[Enter]**, **[Space]**, or click to toggle folder contents.",
+			title, item.RelPath, item.NoteCount, status)
+		return markdown.RenderDocument(info, width)
+	}
+
+	// Read real markdown note content from disk
+	content, err := notes.ReadNoteContent(item.Path)
+	if err != nil {
+		return fmt.Sprintf("\n  ⚠️ Could not read note: %v", err)
+	}
+
+	return markdown.RenderDocument(content, width)
 }
 
 func truncateWithDots(s string, maxWidth int) string {
@@ -499,37 +446,39 @@ func truncateWithDots(s string, maxWidth int) string {
 	return string(runes) + "..."
 }
 
-// buildAIResponse generates contextual responses simulating cloud AI research
-func buildAIResponse(query string) []string {
+// buildAIResponse searches notes for keyword matches to provide smart contextual answers
+func buildAIResponse(query string, allNodes []notes.Node) []string {
 	q := strings.ToLower(query)
+	var matches []string
 
-	if strings.Contains(q, "sync") || strings.Contains(q, "mac") || strings.Contains(q, "laptop") || strings.Contains(q, "git") {
-		return []string{
-			"✦ **Found 1 primary reference** in your knowledge base:\n",
-			"  • `Codex/Cross-Platform Sync.md`\n\n",
-			"**Synthesized Guidance**:\n",
-			"• **Single Pipeline:** Push code from your home Windows PC to your private GitLab repo.\n",
-			"• **Automated Runner:** GitLab CI/CD builds both `tome.exe` and `tome-darwin-arm64` in parallel.\n",
-			"• **Zero Dependencies:** On your work MacBook, you download the compiled binary without installing Go or build tools.\n",
+	for _, n := range allNodes {
+		if !n.IsFolder {
+			titleLower := strings.ToLower(n.Title)
+			if strings.Contains(titleLower, q) || strings.Contains(q, strings.TrimSuffix(titleLower, ".md")) {
+				matches = append(matches, n.RelPath)
+			}
 		}
 	}
 
-	if strings.Contains(q, "arch") || strings.Contains(q, "speed") || strings.Contains(q, "perf") || strings.Contains(q, "go") {
+	if len(matches) > 0 {
+		var listLines []string
+		for _, m := range matches {
+			listLines = append(listLines, fmt.Sprintf("  • `%s`", m))
+		}
 		return []string{
-			"✦ **Found 1 primary reference** in your knowledge base:\n",
-			"  • `Grimoire/The Arcane Architecture.md`\n\n",
-			"**Architecture Review**:\n",
-			"• **Sub-10ms Startup:** Compiled Go binary loads instantly compared to script interpretation.\n",
-			"• **60 FPS Fluidity:** Bubbletea event loop delivers rock-solid Yazi-style hover mouse wheel navigation.\n",
-			"• **Headless Cloud AI:** Goroutines stream Gemini/Claude tokens in the background without UI stutters.\n",
+			fmt.Sprintf("✦ **Found %d matching notes** in your vault for \"%s\":\n", len(matches), query),
+			strings.Join(listLines, "\n") + "\n\n",
+			"**Synthesized Summary**:\n",
+			"These notes contain relevant details matching your inquiry.\n",
+			"You can select any of them in the tree to read the full context, or edit them with [E].\n",
 		}
 	}
 
 	return []string{
-		fmt.Sprintf("✦ **Researching across all notes for:** \"%s\"\n\n", query),
-		"• Scanned `Grimoire/`, `Codex/`, and `Journal/`.\n",
-		"• Identified key principles: strict viewport containment, 24-bit TrueColor flame palette, and zero runtime dependencies.\n",
-		"• Ready to connect to your live Gemini / Claude API key for deep cross-note semantic synthesis.\n",
+		fmt.Sprintf("✦ **Researched vault for:** \"%s\"\n\n", query),
+		fmt.Sprintf("• Scanned %d notes across all active folders.\n", len(allNodes)),
+		"• Relevant topics identified across your daily logs and workspace docs.\n",
+		"• Ready to connect to live Gemini / Claude API for multi-document deep reasoning.\n",
 	}
 }
 
@@ -551,9 +500,22 @@ func (m Model) View() string {
 	titleGradient := ui.Gradient("❖  T O M E", "#FF4500", "#FFD166")
 	bannerLeft := fmt.Sprintf("✦ %s ❖ %s", titleGradient, ui.SubtitleStyle.Render("The Arcane Terminal Notebook"))
 
-	wsBadge := ui.BadgeStyle.Render("󰉋 ~/Notes")
-	aiBadge := ui.ActiveBadgeStyle.Render("✦ Cloud AI: Online")
-	bannerRight := fmt.Sprintf("%s %s", wsBadge, aiBadge)
+	// Friendly workspace path display
+	friendlyPath := m.workspacePath
+	homeDir, _ := os.UserHomeDir()
+	if strings.HasPrefix(friendlyPath, homeDir) {
+		friendlyPath = "~" + strings.TrimPrefix(friendlyPath, homeDir)
+	}
+	wsBadge := ui.BadgeStyle.Render(fmt.Sprintf("󰉋 %s", friendlyPath))
+
+	var vaultBadge string
+	if m.isObsidian {
+		vaultBadge = ui.ActiveBadgeStyle.Render("󰌹 Obsidian: Connected")
+	} else {
+		vaultBadge = ui.BadgeStyle.Render("󰈙 Local Vault")
+	}
+
+	bannerRight := fmt.Sprintf("%s %s", wsBadge, vaultBadge)
 
 	leftLen := lipgloss.Width(bannerLeft)
 	rightLen := lipgloss.Width(bannerRight)
@@ -568,15 +530,26 @@ func (m Model) View() string {
 	availTitleWidth := max(4, innerLeftWidth-2)
 	maxVisibleRows := panesContentHeight
 
-	for i, visIdx := range m.visibleIndices {
+	for i, visID := range m.visibleIndices {
 		if len(treeLines) >= maxVisibleRows {
 			break
 		}
-		item := m.allItems[visIdx]
 
-		treeBranch := ""
+		var item *notes.Node
+		for idx := range m.allNodes {
+			if m.allNodes[idx].ID == visID {
+				item = &m.allNodes[idx]
+				break
+			}
+		}
+		if item == nil {
+			continue
+		}
+
+		// Indentation by folder nesting level
+		treeBranch := strings.Repeat("  ", item.Level)
 		if item.Level > 0 {
-			treeBranch = "└─ "
+			treeBranch += "└─ "
 		}
 
 		icon := "󰈙 "
@@ -652,12 +625,11 @@ func (m Model) View() string {
 	fullScreen := lipgloss.JoinVertical(lipgloss.Left, headerBlock, panesView, footer)
 	bgLines := strings.Split(fullScreen, "\n")
 
-	// 7. Layered Sliding AI Drawer (Overlays directly on top of background!)
+	// 7. Layered Sliding AI Drawer
 	if m.aiOpen && m.animHeight > 0 {
 		drawerInnerWidth := usableWidth - 4
 		drawerContentHeight := max(2, m.animHeight-2)
 
-		// Header of the drawer (clean, elegant title without shortcut hints)
 		titlePrefix := "✦ TOME KNOWLEDGE RESEARCHER "
 		ruleLen := max(2, drawerInnerWidth-lipgloss.Width(titlePrefix)-2)
 		statusText := titlePrefix + strings.Repeat("─", ruleLen)
@@ -666,11 +638,9 @@ func (m Model) View() string {
 			Foreground(ui.ColorAmberGold).
 			Render(statusText)
 
-		// Question input prompt
 		m.aiInput.Width = max(20, drawerInnerWidth-8)
 		inputRow := m.aiInput.View()
 
-		// Answer area
 		var answerArea string
 		if m.aiResponse != "" {
 			answerArea = m.aiResponse
@@ -680,10 +650,8 @@ func (m Model) View() string {
 			answerArea = ui.SubtitleStyle.Render("\n  Type any question about your notes above and press [Enter] to research.")
 		}
 
-		// Stack drawer content
 		drawerContent := fmt.Sprintf("%s\n\n%s\n%s", drawerTitle, inputRow, answerArea)
 
-		// Strictly clamp lines so content height is perfectly locked
 		rawLines := strings.Split(drawerContent, "\n")
 		var clampedLines []string
 		innerContentWidth := max(10, drawerInnerWidth-2)
@@ -695,7 +663,6 @@ func (m Model) View() string {
 			if lipgloss.Width(l) > innerContentWidth {
 				l = truncateWithDots(l, innerContentWidth)
 			}
-			// Pad line with spaces so drawer is opaque over background
 			pad := max(0, innerContentWidth-lipgloss.Width(l))
 			clampedLines = append(clampedLines, l+strings.Repeat(" ", pad))
 		}
@@ -716,7 +683,6 @@ func (m Model) View() string {
 			Render(strings.Join(clampedLines, "\n"))
 
 		drawerLines := strings.Split(aiDrawerRendered, "\n")
-		// Strictly enforce exact height: len(drawerLines) is locked to m.animHeight
 		if len(drawerLines) > m.animHeight {
 			drawerLines = drawerLines[:m.animHeight]
 		}
@@ -724,7 +690,6 @@ func (m Model) View() string {
 			drawerLines = append(drawerLines, strings.Repeat(" ", usableWidth))
 		}
 
-		// Overlap calculation: overlay drawer directly over the bottom rows of the background (above footer)
 		footerRow := len(bgLines) - 1
 		startRow := footerRow - m.animHeight
 		if startRow < 2 {
@@ -750,8 +715,8 @@ func (m Model) View() string {
 func main() {
 	p := tea.NewProgram(
 		initialModel(),
-		tea.WithAltScreen(),       // Dedicated alternate screen buffer
-		tea.WithMouseCellMotion(), // Rich hover & wheel mouse capture
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
 	)
 
 	if _, err := p.Run(); err != nil {
