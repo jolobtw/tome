@@ -10,76 +10,93 @@ import (
 
 // RenderDocument converts raw markdown text into styled terminal ANSI lines with given width
 func RenderDocument(raw string, width int) string {
-	if width < 20 {
-		width = 20
+	if width < 24 {
+		width = 24
 	}
 
 	lines := strings.Split(raw, "\n")
 	var rendered []string
 	inCodeBlock := false
+	currentCalloutColor := ui.ColorCyan
+
+	// Box border style for codeblocks
+	codeBorderStyle := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted)
+	boxWidth := max(20, width-6)
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// 1. Code Blocks
+		// 1. Code Blocks: Fully enclosed box with matching corners and equal width
 		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
 			inCodeBlock = !inCodeBlock
-			border := strings.Repeat("─", width-4)
 			if inCodeBlock {
 				lang := strings.TrimPrefix(strings.TrimPrefix(trimmed, "```"), "~~~")
 				if lang == "" {
 					lang = "code"
 				}
-				rendered = append(rendered, lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render(fmt.Sprintf("  ╭─ %s %s", lang, border[:max(0, len(border)-len(lang)-4)])))
+				ruleLen := max(2, boxWidth-len(lang)-6)
+				headerLine := fmt.Sprintf("  ╭─ %s %s╮", lang, strings.Repeat("─", ruleLen))
+				rendered = append(rendered, codeBorderStyle.Render(headerLine))
 			} else {
-				rendered = append(rendered, lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render(fmt.Sprintf("  ╰%s", border)))
+				footerLine := fmt.Sprintf("  ╰%s╯", strings.Repeat("─", boxWidth-2))
+				rendered = append(rendered, codeBorderStyle.Render(footerLine))
 			}
 			continue
 		}
 
 		if inCodeBlock {
-			codeLine := lipgloss.NewStyle().
-				Foreground(ui.ColorGreen).
-				Render("  │ " + line)
-			rendered = append(rendered, codeLine)
+			// Code content with matching left and right borders
+			leftBar := codeBorderStyle.Render("  │  ")
+			rightBar := codeBorderStyle.Render("│")
+
+			// Truncate or pad to box width
+			availCodeWidth := max(4, boxWidth-6)
+			displayCode := line
+			if lipgloss.Width(displayCode) > availCodeWidth {
+				displayCode = displayCode[:availCodeWidth-3] + "..."
+			}
+			padSpaces := max(0, availCodeWidth-lipgloss.Width(displayCode))
+			paddedCode := lipgloss.NewStyle().Foreground(ui.ColorGreen).Render(displayCode) + strings.Repeat(" ", padSpaces)
+
+			rendered = append(rendered, leftBar+paddedCode+" "+rightBar)
 			continue
 		}
 
-		// 2. Obsidian Callouts
+		// 2. Obsidian Callouts: Sleek accent-bar style matching Obsidian Desktop
 		if strings.HasPrefix(trimmed, "> [!NOTE]") || strings.HasPrefix(trimmed, "> [!INFO]") {
-			rendered = append(rendered, lipgloss.NewStyle().
-				Bold(true).
-				Foreground(ui.ColorCyan).
-				Render("  ╭─ ℹ  NOTE ─────────────────────────────────────"))
+			currentCalloutColor = ui.ColorCyan
+			bar := lipgloss.NewStyle().Foreground(currentCalloutColor).Bold(true).Render("  ▎ ")
+			title := lipgloss.NewStyle().Foreground(currentCalloutColor).Bold(true).Render("ℹ NOTE")
+			rendered = append(rendered, "", bar+title)
 			continue
 		}
 		if strings.HasPrefix(trimmed, "> [!TIP]") {
-			rendered = append(rendered, lipgloss.NewStyle().
-				Bold(true).
-				Foreground(ui.ColorGreen).
-				Render("  ╭─ 💡 TIP ──────────────────────────────────────"))
+			currentCalloutColor = ui.ColorGreen
+			bar := lipgloss.NewStyle().Foreground(currentCalloutColor).Bold(true).Render("  ▎ ")
+			title := lipgloss.NewStyle().Foreground(currentCalloutColor).Bold(true).Render("💡 TIP")
+			rendered = append(rendered, "", bar+title)
 			continue
 		}
 		if strings.HasPrefix(trimmed, "> [!WARNING]") || strings.HasPrefix(trimmed, "> [!IMPORTANT]") {
-			rendered = append(rendered, lipgloss.NewStyle().
-				Bold(true).
-				Foreground(ui.ColorAmberGold).
-				Render("  ╭─ ⚠️  WARNING ──────────────────────────────────"))
+			currentCalloutColor = ui.ColorAmberGold
+			bar := lipgloss.NewStyle().Foreground(currentCalloutColor).Bold(true).Render("  ▎ ")
+			title := lipgloss.NewStyle().Foreground(currentCalloutColor).Bold(true).Render("⚠️  WARNING")
+			rendered = append(rendered, "", bar+title)
 			continue
 		}
 		if strings.HasPrefix(trimmed, "> [!CAUTION]") {
-			rendered = append(rendered, lipgloss.NewStyle().
-				Bold(true).
-				Foreground(ui.ColorRed).
-				Render("  ╭─ 🛑 CAUTION ──────────────────────────────────"))
+			currentCalloutColor = ui.ColorRed
+			bar := lipgloss.NewStyle().Foreground(currentCalloutColor).Bold(true).Render("  ▎ ")
+			title := lipgloss.NewStyle().Foreground(currentCalloutColor).Bold(true).Render("🛑 CAUTION")
+			rendered = append(rendered, "", bar+title)
 			continue
 		}
 		if strings.HasPrefix(trimmed, ">") {
 			content := strings.TrimPrefix(line, ">")
 			content = strings.TrimPrefix(content, " ")
-			rendered = append(rendered, lipgloss.NewStyle().
-				Foreground(ui.ColorTextRegular).
-				Render("  │  "+content))
+			bar := lipgloss.NewStyle().Foreground(currentCalloutColor).Render("  ▎ ")
+			text := lipgloss.NewStyle().Foreground(ui.ColorTextRegular).Render(formatInlineText(content))
+			rendered = append(rendered, bar+text)
 			continue
 		}
 
@@ -90,9 +107,10 @@ func RenderDocument(raw string, width int) string {
 				Bold(true).
 				Foreground(ui.ColorFlameOrange).
 				Render("  " + title)
+			underlineLen := min(width-6, lipgloss.Width(title)+4)
 			rule := lipgloss.NewStyle().
 				Foreground(ui.ColorAmberGold).
-				Render("  " + strings.Repeat("━", min(width-6, len(title)+4)))
+				Render("  " + strings.Repeat("━", underlineLen))
 			rendered = append(rendered, "", h1, rule)
 			continue
 		}
@@ -159,7 +177,6 @@ func RenderDocument(raw string, width int) string {
 
 // formatInlineText handles inline wiki-links [[Link]], `code`, and **bold**
 func formatInlineText(text string) string {
-	// Simple inline styling replacements
 	// 1. Wiki-links: [[Target]]
 	for strings.Contains(text, "[[") && strings.Contains(text, "]]") {
 		start := strings.Index(text, "[[")
