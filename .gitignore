@@ -1,0 +1,15 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+tome
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
