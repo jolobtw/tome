@@ -657,21 +657,15 @@ func (m Model) View() string {
 		drawerInnerWidth := usableWidth - 4
 		drawerContentHeight := max(2, m.animHeight-2)
 
-		// Header of the drawer
+		// Header of the drawer (strictly fixed and static - no spinner in title bar)
 		statusText := "✦ TOME KNOWLEDGE RESEARCHER ────────────────────────────── [Esc: Close]"
-		if m.aiState == "thinking" {
-			spinRune := arcaneSpinners[m.aiAnimStep%len(arcaneSpinners)]
-			statusText = fmt.Sprintf("✦ TOME RESEARCHER [ %s Communing with the Grimoire... ]", spinRune)
-		} else if m.aiState == "streaming" {
-			statusText = "✦ TOME RESEARCHER [ ✦ Streaming Wisdom from Cloud AI... ]"
-		}
-
 		drawerTitle := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ui.ColorAmberGold).
 			Render(statusText)
 
 		// Question input prompt
+		m.aiInput.Width = max(20, drawerInnerWidth-8)
 		inputRow := m.aiInput.View()
 
 		// Answer area
@@ -679,9 +673,7 @@ func (m Model) View() string {
 		if m.aiResponse != "" {
 			answerArea = m.aiResponse
 		} else if m.aiQuery != "" && m.aiState == "thinking" {
-			spinRune := arcaneSpinners[m.aiAnimStep%len(arcaneSpinners)]
-			pulseBar := ui.Gradient("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "#FF4500", "#FFD166")
-			answerArea = fmt.Sprintf("\n  %s Investigating your question across all notes...\n  %s", spinRune, pulseBar)
+			answerArea = "\n  Communing with the Grimoire and researching your notes..."
 		} else {
 			answerArea = ui.SubtitleStyle.Render("\n  Type any question about your notes above and press [Enter] to research.")
 		}
@@ -689,22 +681,24 @@ func (m Model) View() string {
 		// Stack drawer content
 		drawerContent := fmt.Sprintf("%s\n\n%s\n%s", drawerTitle, inputRow, answerArea)
 
-		// Strict line formatting so drawer content never exceeds drawerContentHeight
+		// Strictly clamp lines so content height is perfectly locked
 		rawLines := strings.Split(drawerContent, "\n")
 		var clampedLines []string
+		innerContentWidth := max(10, drawerInnerWidth-2)
+
 		for idx, l := range rawLines {
 			if idx >= drawerContentHeight {
 				break
 			}
-			if lipgloss.Width(l) > drawerInnerWidth {
-				l = truncateWithDots(l, drawerInnerWidth)
+			if lipgloss.Width(l) > innerContentWidth {
+				l = truncateWithDots(l, innerContentWidth)
 			}
-			// Pad line with spaces so drawer is opaque over background!
-			pad := max(0, drawerInnerWidth-lipgloss.Width(l))
+			// Pad line with spaces so drawer is opaque over background
+			pad := max(0, innerContentWidth-lipgloss.Width(l))
 			clampedLines = append(clampedLines, l+strings.Repeat(" ", pad))
 		}
 		for len(clampedLines) < drawerContentHeight {
-			clampedLines = append(clampedLines, strings.Repeat(" ", drawerInnerWidth))
+			clampedLines = append(clampedLines, strings.Repeat(" ", innerContentWidth))
 		}
 
 		aiBoxStyle := lipgloss.NewStyle().
@@ -716,13 +710,21 @@ func (m Model) View() string {
 		aiDrawerRendered := aiBoxStyle.
 			Width(drawerInnerWidth).
 			Height(drawerContentHeight).
+			MaxHeight(m.animHeight).
 			Render(strings.Join(clampedLines, "\n"))
 
 		drawerLines := strings.Split(aiDrawerRendered, "\n")
+		// Strictly enforce exact height: len(drawerLines) is locked to m.animHeight
+		if len(drawerLines) > m.animHeight {
+			drawerLines = drawerLines[:m.animHeight]
+		}
+		for len(drawerLines) < m.animHeight {
+			drawerLines = append(drawerLines, strings.Repeat(" ", usableWidth))
+		}
 
 		// Overlap calculation: overlay drawer directly over the bottom rows of the background (above footer)
 		footerRow := len(bgLines) - 1
-		startRow := footerRow - len(drawerLines)
+		startRow := footerRow - m.animHeight
 		if startRow < 2 {
 			startRow = 2
 		}
