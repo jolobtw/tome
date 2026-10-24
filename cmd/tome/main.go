@@ -587,7 +587,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.saveStatus = ""
 						m.editor.SetValue(normalized)
 						cmd := m.editor.Focus()
-						m.editor, _ = m.editor.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+						scrollToBottom(&m.editor)
 						return m, cmd
 					}
 				}
@@ -1440,7 +1440,7 @@ func (m *Model) confirmNewNote() tea.Cmd {
 	m.saveStatus = ""
 	m.editor.SetValue(initialContent)
 	focusCmd := m.editor.Focus()
-	m.editor, _ = m.editor.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+	scrollToBottom(&m.editor)
 	return focusCmd
 }
 
@@ -1533,6 +1533,13 @@ func (m *Model) confirmQuickLog() {
 	m.modalType = ""
 	m.modalInput.Blur()
 	m.updateViewportPreview()
+}
+
+// scrollToBottom primes the editor's viewport buffer and scrolls to the end of the note
+func scrollToBottom(ta *textarea.Model) {
+	_ = ta.View()
+	ta.CursorEnd()
+	*ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyDown})
 }
 
 // findCursorVisualRow scans the editor's rendered view to locate which visible row contains the cursor
