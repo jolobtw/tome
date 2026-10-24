@@ -141,23 +141,65 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 	return m
 }
 
-// rebuildVisible computes the flat visible list of nodes based on which folders are expanded
+// rebuildVisible computes the flat visible list of nodes with continuous tree guide lines
 func (m *Model) rebuildVisible() {
 	var visible []int
-	var addChildren func(parentID int)
 
-	addChildren = func(parentID int) {
-		for _, n := range m.allNodes {
-			if n.ParentID == parentID {
-				visible = append(visible, n.ID)
-				if n.IsFolder && n.Expanded {
-					addChildren(n.ID)
+	var addLevel func(parentID int, level int, ancestorsHasNext []bool)
+	addLevel = func(parentID int, level int, ancestorsHasNext []bool) {
+		var childNodeIndices []int
+		for idx := range m.allNodes {
+			if m.allNodes[idx].ParentID == parentID {
+				childNodeIndices = append(childNodeIndices, idx)
+			}
+		}
+
+		// Direct notes first, then subfolders (matching standard notebook hierarchy)
+		var notesIndices []int
+		var folderIndices []int
+		for _, idx := range childNodeIndices {
+			if m.allNodes[idx].IsFolder {
+				folderIndices = append(folderIndices, idx)
+			} else {
+				notesIndices = append(notesIndices, idx)
+			}
+		}
+
+		sortedIndices := append(notesIndices, folderIndices...)
+		total := len(sortedIndices)
+
+		for i, nodeIdx := range sortedIndices {
+			isLast := (i == total-1)
+			m.allNodes[nodeIdx].IsLast = isLast
+
+			// Continuous tree guide line calculation
+			var prefix strings.Builder
+			for _, hasNext := range ancestorsHasNext {
+				if hasNext {
+					prefix.WriteString("│  ")
+				} else {
+					prefix.WriteString("   ")
 				}
+			}
+			if level > 0 {
+				if isLast {
+					prefix.WriteString("└─ ")
+				} else {
+					prefix.WriteString("├─ ")
+				}
+			}
+			m.allNodes[nodeIdx].Prefix = prefix.String()
+
+			visible = append(visible, m.allNodes[nodeIdx].ID)
+
+			if m.allNodes[nodeIdx].IsFolder && m.allNodes[nodeIdx].Expanded {
+				nextAncestors := append(ancestorsHasNext, !isLast)
+				addLevel(m.allNodes[nodeIdx].ID, level+1, nextAncestors)
 			}
 		}
 	}
 
-	addChildren(-1)
+	addLevel(-1, 0, []bool{})
 	m.visibleIndices = visible
 	if m.selectedIdx >= len(m.visibleIndices) {
 		m.selectedIdx = max(0, len(m.visibleIndices)-1)
@@ -277,6 +319,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedIdx < len(m.visibleIndices)-1 {
 				m.selectedIdx++
 				m.updateViewportPreview()
+			}
+
+		case "a", "left":
+			// Collapse folder if expanded, or jump up to parent folder
+			if m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
+				actualID := m.visibleIndices[m.selectedIdx]
+				var current *notes.Node
+				for idx := range m.allNodes {
+					if m.allNodes[idx].ID == actualID {
+						current = &m.allNodes[idx]
+						break
+					}
+				}
+				if current != nil {
+					if current.IsFolder && current.Expanded {
+						current.Expanded = false
+						m.rebuildVisible()
+						m.updateViewportPreview()
+					} else if current.ParentID != -1 {
+						for vIdx, id := range m.visibleIndices {
+							if id == current.ParentID {
+								m.selectedIdx = vIdx
+								m.updateViewportPreview()
+								break
+							}
+						}
+					}
+				}
+			}
+
+		case "d", "right":
+			// Expand folder if collapsed, or move down into first child
+			if m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
+				actualID := m.visibleIndices[m.selectedIdx]
+				for idx := range m.allNodes {
+					if m.allNodes[idx].ID == actualID {
+						if m.allNodes[idx].IsFolder {
+							if !m.allNodes[idx].Expanded {
+								m.allNodes[idx].Expanded = true
+								m.rebuildVisible()
+								m.updateViewportPreview()
+							} else if len(m.allNodes[idx].ChildIDs) > 0 && m.selectedIdx < len(m.visibleIndices)-1 {
+								m.selectedIdx++
+								m.updateViewportPreview()
+							}
+						}
+						break
+					}
+				}
 			}
 
 		case "enter", "space":
@@ -546,12 +637,6 @@ func (m Model) View() string {
 			continue
 		}
 
-		// Indentation by folder nesting level
-		treeBranch := strings.Repeat("  ", item.Level)
-		if item.Level > 0 {
-			treeBranch += "└─ "
-		}
-
 		icon := "󰈙 "
 		if item.IsFolder {
 			if item.Expanded {
@@ -561,7 +646,7 @@ func (m Model) View() string {
 			}
 		}
 
-		rawTitle := truncateWithDots(treeBranch+icon+item.Title, availTitleWidth)
+		rawTitle := truncateWithDots(item.Prefix+icon+item.Title, availTitleWidth)
 		noBreakTitle := strings.ReplaceAll(rawTitle, " ", "\u00a0")
 
 		if i == m.selectedIdx {
@@ -610,8 +695,8 @@ func (m Model) View() string {
 		kQuit := ui.FooterKeyStyle.Render("[Ctrl+C]") + ui.FooterDescStyle.Render(" Quit")
 		footer = " " + kEnter + kClose + kQuit
 	} else {
-		kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Navigate  ")
-		kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Toggle Folder  ")
+		kNav := ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  ")
+		kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  ")
 		kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
 		kTab := ui.FooterKeyStyle.Render("[Tab]") + ui.FooterDescStyle.Render(" Switch Pane  ")
 		kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")

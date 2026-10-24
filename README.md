@@ -29,7 +29,9 @@ A high-velocity, aesthetic terminal notebook for browsing, writing, and organizi
 
 | Shortcut | Action |
 |:---|:---|
-| `W/S` or `↑/↓` or `J/K` | Navigate tree items |
+| `W/S` or `↑/↓` or `J/K` | Move selection up / down |
+| `A` or `Left` | Collapse folder (or jump to parent folder) |
+| `D` or `Right` | Expand folder (or step into first child) |
 | `Enter` or `Space` | Toggle folder expand / collapse |
 | `Mouse Hover + Scroll` | Context-aware scrolling (Tree vs Preview) |
 | `Left Click` | Select item or toggle folder |

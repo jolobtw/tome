@@ -21,6 +21,8 @@ type Node struct {
 	ChildIDs  []int
 	ModTime   time.Time
 	NoteCount int // For folders: total notes inside
+	IsLast    bool
+	Prefix    string // Connected tree guide lines (e.g. │  ├─ )
 }
 
 // ScanTree scans the notebook directory and builds an indexed tree of folders and markdown notes
