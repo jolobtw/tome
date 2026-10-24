@@ -174,7 +174,12 @@ func (m *Model) rebuildVisible() {
 
 			// Continuous tree guide line calculation
 			var prefix strings.Builder
-			for _, hasNext := range ancestorsHasNext {
+			for lvl, hasNext := range ancestorsHasNext {
+				if lvl == 0 {
+					// Root ancestor: do not draw vertical guide line between root-level folders
+					prefix.WriteString("   ")
+					continue
+				}
 				if hasNext {
 					prefix.WriteString("│  ")
 				} else {
@@ -618,7 +623,7 @@ func (m Model) View() string {
 	// 2. Tree Pane (Left)
 	innerLeftWidth := leftTotalWidth - 4
 	var treeLines []string
-	availTitleWidth := max(4, innerLeftWidth-2)
+	availTitleWidth := max(4, innerLeftWidth-4)
 	maxVisibleRows := panesContentHeight
 
 	for i, visID := range m.visibleIndices {
@@ -648,6 +653,7 @@ func (m Model) View() string {
 
 		rawTitle := truncateWithDots(item.Prefix+icon+item.Title, availTitleWidth)
 		noBreakTitle := strings.ReplaceAll(rawTitle, " ", "\u00a0")
+		noBreakTitle = strings.ReplaceAll(noBreakTitle, "-", "\u2011")
 
 		if i == m.selectedIdx {
 			cursor := ui.TreeCursor.Render("▌") + "\u00a0"
