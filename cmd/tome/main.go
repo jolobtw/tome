@@ -1415,6 +1415,47 @@ func (m *Model) openQuickLogModal() {
 	m.modalInput.Focus()
 }
 
+// rescanTreePreservingExpansion rescans the workspace directory while preserving
+// the expanded state of all previously expanded folders, and ensures all ancestors of
+// targetPath are expanded so the new item is immediately visible.
+func (m *Model) rescanTreePreservingExpansion(targetPath string) {
+	// 1. Remember all folders that the user currently has expanded
+	expandedFolders := make(map[string]bool)
+	for _, node := range m.allNodes {
+		if node.IsFolder && node.Expanded {
+			expandedFolders[filepath.Clean(node.Path)] = true
+		}
+	}
+
+	// 2. Rescan the workspace from disk
+	nodes, isObs, _ := notes.ScanTree(m.workspacePath, m.config.SortMode)
+	m.allNodes = nodes
+	m.isObsidian = isObs
+
+	// 3. Restore previous expansion states and expand ancestors of targetPath
+	cleanTarget := filepath.Clean(targetPath)
+	for idx := range m.allNodes {
+		if m.allNodes[idx].IsFolder {
+			cleanNodePath := filepath.Clean(m.allNodes[idx].Path)
+
+			// Keep previously expanded folders open
+			if expandedFolders[cleanNodePath] {
+				m.allNodes[idx].Expanded = true
+			}
+
+			// Also expand all ancestors of the target item so it's visible in the tree
+			if cleanTarget != "" && cleanNodePath != cleanTarget {
+				rel, err := filepath.Rel(cleanNodePath, cleanTarget)
+				if err == nil && !strings.HasPrefix(rel, "..") {
+					m.allNodes[idx].Expanded = true
+				}
+			}
+		}
+	}
+
+	m.rebuildVisible()
+}
+
 func (m *Model) confirmNewNote() tea.Cmd {
 	title := strings.TrimSpace(m.modalInput.Value())
 	if title == "" {
@@ -1453,19 +1494,8 @@ func (m *Model) confirmNewNote() tea.Cmd {
 		return nil
 	}
 
-	// Rescan tree and select the new note
-	nodes, isObs, _ := notes.ScanTree(m.workspacePath, m.config.SortMode)
-	m.allNodes = nodes
-	m.isObsidian = isObs
-
-	// Automatically expand parent folder if needed
-	for idx := range m.allNodes {
-		if m.allNodes[idx].IsFolder && strings.HasPrefix(targetPath, m.allNodes[idx].Path) {
-			m.allNodes[idx].Expanded = true
-		}
-	}
-
-	m.rebuildVisible()
+	// Rescan tree while preserving all expanded folders, and select the new note
+	m.rescanTreePreservingExpansion(targetPath)
 
 	// Find the new note in visible indices and select it
 	for vIdx, id := range m.visibleIndices {
@@ -1501,18 +1531,8 @@ func (m *Model) confirmNewFolder() {
 	targetPath := filepath.Join(m.modalDestPath, name)
 	_ = os.MkdirAll(targetPath, 0755)
 
-	nodes, isObs, _ := notes.ScanTree(m.workspacePath, m.config.SortMode)
-	m.allNodes = nodes
-	m.isObsidian = isObs
-
-	// Automatically expand parent folder if needed
-	for idx := range m.allNodes {
-		if m.allNodes[idx].IsFolder && strings.HasPrefix(targetPath, m.allNodes[idx].Path) {
-			m.allNodes[idx].Expanded = true
-		}
-	}
-
-	m.rebuildVisible()
+	// Rescan tree while preserving all expanded folders, and expand parent of new folder
+	m.rescanTreePreservingExpansion(targetPath)
 
 	// Select the newly created folder
 	for vIdx, id := range m.visibleIndices {
@@ -1561,10 +1581,8 @@ func (m *Model) confirmQuickLog() {
 		_ = f.Close()
 	}
 
-	nodes, isObs, _ := notes.ScanTree(m.workspacePath, m.config.SortMode)
-	m.allNodes = nodes
-	m.isObsidian = isObs
-	m.rebuildVisible()
+	// Rescan tree while preserving all expanded folders, and select quick log note
+	m.rescanTreePreservingExpansion(targetPath)
 
 	// Select the quick log note so user sees it previewed immediately
 	for vIdx, id := range m.visibleIndices {
