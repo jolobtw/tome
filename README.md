@@ -17,7 +17,7 @@ A high-velocity, aesthetic terminal notebook for browsing, writing, and organizi
   - Native callout cards (`> [!NOTE]`, `> [!TIP]`, `> [!WARNING]`, `> [!CAUTION]`).
   - Checklists (`- [x]`, `- [ ]`), inline code blocks, and wiki-links (`[[Note]]`).
 - **Headless Cloud AI Research:**
-  - Press `A` to open the AI researcher drawer.
+  - Press `Ctrl+K` to open the AI researcher drawer.
   - Non-blocking background streaming powered by Go Goroutines.
 - **Single Zero-Dependency Binary:**
   - Instant startup (< 10ms).
@@ -34,7 +34,7 @@ A high-velocity, aesthetic terminal notebook for browsing, writing, and organizi
 | `Mouse Hover + Scroll` | Context-aware scrolling (Tree vs Preview) |
 | `Left Click` | Select item or toggle folder |
 | `Tab` | Switch active focus between Tree and Preview |
-| `A` | Toggle Cloud AI Research Assistant |
+| `Ctrl+K` | Toggle Cloud AI Research Assistant |
 | `Esc` | Close AI Drawer |
 | `Q` or `Ctrl+C` | Quit Tome |
 

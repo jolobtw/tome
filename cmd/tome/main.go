@@ -66,7 +66,7 @@ var sampleAIStream = []string{
 	"1. **Pixel-Perfect Viewport:** Strict mathematical column/row budgeting prevents border breakage.\n",
 	"2. **Subtle Aesthetic:** Selection cursor uses an elegant left accent bar (`▌`) instead of abrasive blocks.\n",
 	"3. **Multi-Platform Zero Setup:** Seamless compilation for Windows and Apple Silicon Mac via GitLab.\n\n",
-	"*(Press [Esc] or [A] to close this drawer)*",
+	"*(Press [Esc] or [Ctrl+K] to close this drawer)*",
 }
 
 func sampleData() []Item {
@@ -260,7 +260,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case "a":
+		case "ctrl+k":
 			// Toggle AI Assistant Drawer
 			m.aiOpen = !m.aiOpen
 			if m.aiOpen {
@@ -516,7 +516,7 @@ func (m Model) View() string {
 	if m.aiOpen {
 		statusIndicator := "✦ TOME AI RESEARCHER (Headless Cloud) ─ [Streaming...]"
 		if !m.aiStreaming {
-			statusIndicator = "✦ TOME AI RESEARCHER (Headless Cloud) ─ [Ready]  (Esc to close)"
+			statusIndicator = "✦ TOME AI RESEARCHER (Headless Cloud) ─ [Ready]  (Esc or Ctrl+K to close)"
 		}
 		titleBar := lipgloss.NewStyle().
 			Bold(true).
@@ -549,7 +549,7 @@ func (m Model) View() string {
 	// 6. 1-Row Footer (Affixed to the bottom of the screen)
 	kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Navigate  ")
 	kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Toggle Folder  ")
-	kAi := ui.FooterKeyStyle.Render("[A]") + ui.FooterDescStyle.Render(" Cloud AI  ")
+	kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
 	kTab := ui.FooterKeyStyle.Render("[Tab]") + ui.FooterDescStyle.Render(" Switch Pane  ")
 	kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
 	footer := " " + kNav + kExp + kAi + kTab + kQuit
