@@ -600,7 +600,7 @@ func (m *Model) recalculateViewport() {
 		m.viewport.Width = viewportWidth
 		m.viewport.Height = viewportHeight
 	}
-	m.editor.SetWidth(viewportWidth)
+	m.editor.SetWidth(max(10, rightTotalWidth-6))
 	m.editor.SetHeight(max(2, panesHeight-3))
 	m.viewport.SetContent(m.renderActivePreview(viewportWidth))
 }
@@ -813,20 +813,33 @@ func (m Model) View() string {
 
 	var rightContent string
 	if m.inEditMode {
+		innerRightWidth := max(10, rightTotalWidth-6)
 		noteTitle := filepath.Base(m.activeNotePath)
+		bannerPrefix := "✎ EDITING: "
+		availTitle := max(4, innerRightWidth-lipgloss.Width(bannerPrefix)-4)
+		if lipgloss.Width(noteTitle) > availTitle {
+			noteTitle = truncateWithDots(noteTitle, availTitle)
+		}
+
 		editorBanner := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ui.ColorFlameOrange).
-			Render(fmt.Sprintf("✎ EDITING: %s", noteTitle))
+			Render(bannerPrefix + noteTitle)
 
-		innerRightWidth := rightTotalWidth - 4
 		ruleWidth := max(2, innerRightWidth-lipgloss.Width(editorBanner)-2)
 		divider := lipgloss.NewStyle().
 			Foreground(ui.ColorBorderMuted).
 			Render(" " + strings.Repeat("─", ruleWidth))
 
 		headerBar := editorBanner + divider
-		rightContent = headerBar + "\n" + m.editor.View()
+		rawContent := headerBar + "\n" + m.editor.View()
+
+		// Enforce strict line clamping so rightContent never exceeds panesContentHeight
+		rLines := strings.Split(rawContent, "\n")
+		if len(rLines) > panesContentHeight {
+			rLines = rLines[:panesContentHeight]
+		}
+		rightContent = strings.Join(rLines, "\n")
 	} else {
 		rightContent = m.viewport.View()
 	}
