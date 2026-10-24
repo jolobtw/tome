@@ -1032,6 +1032,7 @@ func (m Model) View() string {
 	// 8. Layered Floating Modal Overlay (New Note, New Folder, Quick Log)
 	if m.modalType != "" {
 		modalWidth := min(58, usableWidth-4)
+		innerModalWidth := max(10, modalWidth-10)
 		var title string
 		var subLabel string
 		var actionHint string
@@ -1058,14 +1059,13 @@ func (m Model) View() string {
 			actionHint = "[Enter] Save Log Entry  •  [Esc] Cancel"
 		}
 
-		m.modalInput.Width = max(20, modalWidth-10)
+		m.modalInput.Width = max(20, innerModalWidth-4)
 		inputBox := m.modalInput.View()
 
 		subStyle := ui.SubtitleStyle.Render(subLabel)
 		hintStyle := ui.SubtitleStyle.Render(actionHint)
 
-		ruleLen := max(10, modalWidth-8)
-		rule := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", ruleLen))
+		rule := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", innerModalWidth))
 
 		modalContent := lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -1082,7 +1082,6 @@ func (m Model) View() string {
 		modalBoxStyle := lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(ui.ColorFlameOrange).
-			Background(ui.ColorSelectBg).
 			Padding(1, 2)
 
 		modalRendered := modalBoxStyle.Width(modalWidth - 6).Render(modalContent)
