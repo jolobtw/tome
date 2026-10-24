@@ -489,19 +489,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.activePane = 1 - m.activePane
 
+		case "home", "g":
+			m.viewport.GotoTop()
+			return m, nil
+
+		case "end", "G":
+			m.viewport.GotoBottom()
+			return m, nil
+
+		case "pgup", "ctrl+u":
+			m.viewport.HalfViewUp()
+			return m, nil
+
+		case "pgdown", "ctrl+d":
+			m.viewport.HalfViewDown()
+			return m, nil
+
 		case "up", "k", "w":
-			if m.selectedIdx > 0 {
+			if m.activePane == 1 {
+				m.viewport.LineUp(3)
+			} else if m.selectedIdx > 0 {
 				m.selectedIdx--
 				m.updateViewportPreview()
 			}
 
 		case "down", "j", "s":
-			if m.selectedIdx < len(m.visibleIndices)-1 {
+			if m.activePane == 1 {
+				m.viewport.LineDown(3)
+			} else if m.selectedIdx < len(m.visibleIndices)-1 {
 				m.selectedIdx++
 				m.updateViewportPreview()
 			}
 
 		case "a", "left":
+			if m.activePane == 1 {
+				m.activePane = 0
+				return m, nil
+			}
 			// Collapse folder if expanded, or jump up to parent folder
 			if m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
 				actualID := m.visibleIndices[m.selectedIdx]
@@ -530,22 +554,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "d", "right":
-			// Expand folder if collapsed, or move down into first child
 			if m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
 				actualID := m.visibleIndices[m.selectedIdx]
+				var current *notes.Node
 				for idx := range m.allNodes {
 					if m.allNodes[idx].ID == actualID {
-						if m.allNodes[idx].IsFolder {
-							if !m.allNodes[idx].Expanded {
-								m.allNodes[idx].Expanded = true
-								m.rebuildVisible()
-								m.updateViewportPreview()
-							} else if len(m.allNodes[idx].ChildIDs) > 0 && m.selectedIdx < len(m.visibleIndices)-1 {
-								m.selectedIdx++
-								m.updateViewportPreview()
-							}
-						}
+						current = &m.allNodes[idx]
 						break
+					}
+				}
+				if current != nil {
+					if !current.IsFolder {
+						m.activePane = 1
+						return m, nil
+					}
+					if !current.Expanded {
+						current.Expanded = true
+						m.rebuildVisible()
+						m.updateViewportPreview()
+					} else if len(current.ChildIDs) > 0 && m.selectedIdx < len(m.visibleIndices)-1 {
+						m.selectedIdx++
+						m.updateViewportPreview()
 					}
 				}
 			}
@@ -683,7 +712,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateViewportPreview()
 				}
 			} else {
-				m.viewport.LineUp(3)
+				m.viewport.LineUp(5)
 			}
 
 		case tea.MouseWheelDown:
@@ -693,12 +722,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateViewportPreview()
 				}
 			} else {
-				m.viewport.LineDown(3)
+				m.viewport.LineDown(5)
 			}
 
 		case tea.MouseLeft:
+			if msg.X >= leftTotalWidth {
+				m.activePane = 1
+				return m, nil
+			}
+			m.activePane = 0
 			clickedRow := msg.Y - 3
-			if msg.X < leftTotalWidth && clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
+			if clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
 				now := time.Now()
 				if now.Sub(m.lastClickTime) < 200*time.Millisecond {
 					return m, nil
@@ -761,12 +795,13 @@ func (m *Model) recalculateViewport() {
 	m.editor.SetWidth(max(10, rightTotalWidth-6))
 	m.editor.SetHeight(max(2, panesHeight-3))
 	m.viewport.SetContent(m.renderActivePreview(viewportWidth))
+	m.viewport.GotoBottom()
 }
 
 func (m *Model) updateViewportPreview() {
 	if m.viewport.Width > 0 {
 		m.viewport.SetContent(m.renderActivePreview(m.viewport.Width))
-		m.viewport.GotoTop()
+		m.viewport.GotoBottom()
 	}
 }
 
@@ -1045,16 +1080,27 @@ func (m Model) View() string {
 		kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
 		footer = " ✦ Formatting Guide │ " + kClose + kQuit
 	} else {
-		kNav := ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  ")
-		kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  ")
-		kEdit := ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  ")
-		kNew := ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New Note  ")
-		kFolder := ui.FooterKeyStyle.Render("[F]") + ui.FooterDescStyle.Render(" Folder  ")
-		kLog := ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  ")
-		kCheat := ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide  ")
-		kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
-		kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
-		footer = " " + kNav + kExp + kEdit + kNew + kFolder + kLog + kCheat + kAi + kQuit
+		if m.activePane == 1 {
+			kNav := ui.FooterKeyStyle.Render("[W/S/Wheel]") + ui.FooterDescStyle.Render(" Scroll  ")
+			kJump := ui.FooterKeyStyle.Render("[Home/End]") + ui.FooterDescStyle.Render(" Top/Bottom  ")
+			kTab := ui.FooterKeyStyle.Render("[Tab/A]") + ui.FooterDescStyle.Render(" Tree Pane  ")
+			kEdit := ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  ")
+			kCheat := ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide  ")
+			kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
+			kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
+			footer = " 📄 Preview │ " + kNav + kJump + kTab + kEdit + kCheat + kAi + kQuit
+		} else {
+			kNav := ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  ")
+			kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  ")
+			kEdit := ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  ")
+			kNew := ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New Note  ")
+			kFolder := ui.FooterKeyStyle.Render("[F]") + ui.FooterDescStyle.Render(" Folder  ")
+			kLog := ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  ")
+			kCheat := ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide  ")
+			kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
+			kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
+			footer = " " + kNav + kExp + kEdit + kNew + kFolder + kLog + kCheat + kAi + kQuit
+		}
 	}
 	if lipgloss.Width(footer) > usableWidth {
 		footer = footer[:usableWidth]
