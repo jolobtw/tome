@@ -657,8 +657,10 @@ func (m Model) View() string {
 		drawerInnerWidth := usableWidth - 4
 		drawerContentHeight := max(2, m.animHeight-2)
 
-		// Header of the drawer (strictly fixed and static - no spinner in title bar)
-		statusText := "✦ TOME KNOWLEDGE RESEARCHER ────────────────────────────── [Esc: Close]"
+		// Header of the drawer (clean, elegant title without shortcut hints)
+		titlePrefix := "✦ TOME KNOWLEDGE RESEARCHER "
+		ruleLen := max(2, drawerInnerWidth-lipgloss.Width(titlePrefix)-2)
+		statusText := titlePrefix + strings.Repeat("─", ruleLen)
 		drawerTitle := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ui.ColorAmberGold).
