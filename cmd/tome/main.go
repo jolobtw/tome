@@ -37,6 +37,7 @@ type Model struct {
 	editor         textarea.Model
 	activeNotePath string
 	saveStatus     string
+	lastClickTime  time.Time
 
 	// Interactive AI Knowledge Assistant
 	aiOpen       bool
@@ -126,12 +127,22 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
 	ta.CharLimit = 0
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.LineNumber = lipgloss.NewStyle().Foreground(ui.ColorTextMuted)
-	ta.FocusedStyle.CursorLineNumber = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Bold(true)
-	ta.FocusedStyle.Text = lipgloss.NewStyle().Foreground(ui.ColorTextRegular)
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(ui.ColorAmberGold)
-	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle().Foreground(ui.ColorBorderMuted)
+	ta.MaxHeight = 0 // Unlimited lines: allows Enter to insert newlines regardless of note length
+	ta.EndOfBufferCharacter = ' '
+
+	// Theme-matched styling with NO background color (prevents adaptive light-mode white highlighting!)
+	editorStyle := textarea.Style{
+		Base:             lipgloss.NewStyle(),
+		CursorLine:       lipgloss.NewStyle(), // Clean transparent line, no white block!
+		CursorLineNumber: lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Bold(true),
+		EndOfBuffer:      lipgloss.NewStyle().Foreground(ui.ColorBorderMuted),
+		LineNumber:       lipgloss.NewStyle().Foreground(ui.ColorBorderMuted),
+		Placeholder:      lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true),
+		Prompt:           lipgloss.NewStyle().Foreground(ui.ColorFlameOrange),
+		Text:             lipgloss.NewStyle().Foreground(ui.ColorTextRegular),
+	}
+	ta.FocusedStyle = editorStyle
+	ta.BlurredStyle = editorStyle
 	ta.Cursor.Style = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange)
 
 	m := Model{
@@ -455,11 +466,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if current != nil && !current.IsFolder {
 					rawContent, err := notes.ReadNoteContent(current.Path)
 					if err == nil {
+						// Normalize Windows \r\n to \n to prevent carriage returns from corrupting layout
+						normalized := strings.ReplaceAll(rawContent, "\r\n", "\n")
+						normalized = strings.ReplaceAll(normalized, "\r", "\n")
+
 						m.inEditMode = true
 						m.activePane = 1
 						m.activeNotePath = current.Path
 						m.saveStatus = ""
-						m.editor.SetValue(rawContent)
+						m.editor.SetValue(normalized)
 						cmd := m.editor.Focus()
 						return m, cmd
 					}
@@ -481,14 +496,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		if m.inEditMode {
-			var cmd tea.Cmd
-			m.editor, cmd = m.editor.Update(msg)
-			return m, cmd
-		}
-
 		usableWidth := max(20, m.width-2)
 		leftTotalWidth := max(34, min(52, usableWidth*36/100))
+
+		if m.inEditMode {
+			// Translate screen coordinates to local editor coordinates:
+			// X: right pane starts at leftTotalWidth; 1 col border + 1 col padding = +2
+			// Y: 2 header banner rows + 1 top border row + 1 editor title row = 4 rows
+			editorX := msg.X - (leftTotalWidth + 2)
+			editorY := msg.Y - 4
+
+			if editorX >= 0 && editorY >= 0 && editorX < m.editor.Width() && editorY < m.editor.Height() {
+				localMsg := msg
+				localMsg.X = editorX
+				localMsg.Y = editorY
+				var cmd tea.Cmd
+				m.editor, cmd = m.editor.Update(localMsg)
+				return m, cmd
+			}
+			return m, nil
+		}
 
 		switch msg.Type {
 		case tea.MouseWheelUp:
@@ -514,6 +541,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseLeft:
 			clickedRow := msg.Y - 3
 			if msg.X < leftTotalWidth && clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
+				now := time.Now()
+				if now.Sub(m.lastClickTime) < 200*time.Millisecond {
+					return m, nil
+				}
+				m.lastClickTime = now
+
 				if m.selectedIdx == clickedRow {
 					actualID := m.visibleIndices[clickedRow]
 					for idx := range m.allNodes {
@@ -568,7 +601,7 @@ func (m *Model) recalculateViewport() {
 		m.viewport.Height = viewportHeight
 	}
 	m.editor.SetWidth(viewportWidth)
-	m.editor.SetHeight(viewportHeight)
+	m.editor.SetHeight(max(2, panesHeight-3))
 	m.viewport.SetContent(m.renderActivePreview(viewportWidth))
 }
 
@@ -786,7 +819,20 @@ func (m Model) View() string {
 
 	var rightContent string
 	if m.inEditMode {
-		rightContent = m.editor.View()
+		noteTitle := filepath.Base(m.activeNotePath)
+		editorBanner := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ui.ColorFlameOrange).
+			Render(fmt.Sprintf("✎ EDITING: %s", noteTitle))
+
+		innerRightWidth := rightTotalWidth - 4
+		ruleWidth := max(2, innerRightWidth-lipgloss.Width(editorBanner)-2)
+		divider := lipgloss.NewStyle().
+			Foreground(ui.ColorBorderMuted).
+			Render(" " + strings.Repeat("─", ruleWidth))
+
+		headerBar := editorBanner + divider
+		rightContent = headerBar + "\n" + m.editor.View()
 	} else {
 		rightContent = m.viewport.View()
 	}

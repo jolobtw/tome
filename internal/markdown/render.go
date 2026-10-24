@@ -175,13 +175,17 @@ func RenderDocument(raw string, width int) string {
 		}
 
 		// 5. Checklists (with proper indented wrapping)
-		if strings.HasPrefix(trimmed, "- [x]") || strings.HasPrefix(trimmed, "* [x]") {
+		if strings.HasPrefix(trimmed, "- [x]") || strings.HasPrefix(trimmed, "* [x]") ||
+			strings.HasPrefix(trimmed, "- [X]") || strings.HasPrefix(trimmed, "* [X]") {
 			body := strings.TrimPrefix(trimmed[5:], " ")
-			chk := lipgloss.NewStyle().Foreground(ui.ColorGreen).Bold(true).Render("  ✔ ")
-			indent := "    "
+			rawLeading := len(line) - len(strings.TrimLeft(line, " \t"))
+			depth := min(4, rawLeading/2)
+			baseMargin := strings.Repeat("  ", depth+1)
+			chk := lipgloss.NewStyle().Foreground(ui.ColorGreen).Bold(true).Render(baseMargin + "✔ ")
+			indent := baseMargin + "  "
 			textStyle := lipgloss.NewStyle().Foreground(ui.ColorTextMuted)
 
-			availWidth := max(10, width-8)
+			availWidth := max(10, width-len(indent)-4)
 			wrapped := wrapText(formatInlineText(body), availWidth)
 			for idx, wLine := range wrapped {
 				if idx == 0 {
@@ -194,11 +198,14 @@ func RenderDocument(raw string, width int) string {
 		}
 		if strings.HasPrefix(trimmed, "- [ ]") || strings.HasPrefix(trimmed, "* [ ]") {
 			body := strings.TrimPrefix(trimmed[5:], " ")
-			unchk := lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render("  ○ ")
-			indent := "    "
+			rawLeading := len(line) - len(strings.TrimLeft(line, " \t"))
+			depth := min(4, rawLeading/2)
+			baseMargin := strings.Repeat("  ", depth+1)
+			unchk := lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render(baseMargin + "○ ")
+			indent := baseMargin + "  "
 			textStyle := lipgloss.NewStyle().Foreground(ui.ColorTextRegular)
 
-			availWidth := max(10, width-8)
+			availWidth := max(10, width-len(indent)-4)
 			wrapped := wrapText(formatInlineText(body), availWidth)
 			for idx, wLine := range wrapped {
 				if idx == 0 {
@@ -210,14 +217,36 @@ func RenderDocument(raw string, width int) string {
 			continue
 		}
 
-		// 6. Bullet lists (with proper indented wrapping)
+		// 6. Bullet lists (with proper indented nesting and wrapping)
 		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
 			body := trimmed[2:]
-			bullet := lipgloss.NewStyle().Foreground(ui.ColorAmberGold).Render("  • ")
-			indent := "    "
+
+			// Count leading spaces/tabs on original line to determine nesting depth
+			rawLeading := len(line) - len(strings.TrimLeft(line, " \t"))
+			depth := min(4, rawLeading/2)
+
+			// Choose bullet glyph and color according to nesting level
+			var bulletGlyph string
+			var bulletColor lipgloss.Color
+			switch depth {
+			case 0:
+				bulletGlyph = "• "
+				bulletColor = ui.ColorAmberGold
+			case 1:
+				bulletGlyph = "◦ "
+				bulletColor = ui.ColorGoldGlow
+			default:
+				bulletGlyph = "▪ "
+				bulletColor = ui.ColorTextMuted
+			}
+
+			// Base indentation: 2 spaces margin + 2 spaces per depth level
+			baseMargin := strings.Repeat("  ", depth+1)
+			bullet := lipgloss.NewStyle().Foreground(bulletColor).Render(baseMargin + bulletGlyph)
+			indent := baseMargin + "  "
 			textStyle := lipgloss.NewStyle().Foreground(ui.ColorTextRegular)
 
-			availWidth := max(10, width-8)
+			availWidth := max(10, width-len(indent)-4)
 			wrapped := wrapText(formatInlineText(body), availWidth)
 			for idx, wLine := range wrapped {
 				if idx == 0 {
