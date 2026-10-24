@@ -176,8 +176,7 @@ func (m *Model) rebuildVisible() {
 			var prefix strings.Builder
 			for lvl, hasNext := range ancestorsHasNext {
 				if lvl == 0 {
-					// Root ancestor: do not draw vertical guide line between root-level folders
-					prefix.WriteString("   ")
+					// Root ancestor: do not indent so branch lines start directly below root folder icon
 					continue
 				}
 				if hasNext {
