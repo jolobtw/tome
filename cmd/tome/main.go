@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -36,37 +37,55 @@ type Model struct {
 	selectedIdx    int
 	viewport       viewport.Model
 
-	// AI Research Assistant Drawer
+	// Interactive AI Knowledge Assistant
 	aiOpen       bool
+	aiInput      textinput.Model
+	aiState      string // "idle", "thinking", "streaming"
 	aiQuery      string
 	aiResponse   string
-	aiStreaming  bool
-	aiTokenIndex int
+	aiAnimStep   int
+	aiStreamList []string
+	aiStreamIdx  int
 
-	// Status messages
+	// Smooth slide animation
+	animHeight   int
+	targetHeight int
+	sliding      bool
+	slideDir     int // +1 opening, -1 closing
+
 	statusMsg string
 }
 
-type aiTokenMsg string
-type aiDoneMsg struct{}
+// Custom animation and streaming messages
+type animTickMsg time.Time
+type slideTickMsg struct{}
+type aiStreamMsg string
+type aiStartStreamMsg struct{}
 
-func streamNextToken(token string, delay time.Duration) tea.Cmd {
-	return tea.Tick(delay, func(t time.Time) tea.Msg {
-		return aiTokenMsg(token)
+func animTick() tea.Cmd {
+	return tea.Tick(90*time.Millisecond, func(t time.Time) tea.Msg {
+		return animTickMsg(t)
 	})
 }
 
-var sampleAIStream = []string{
-	"Searching knowledge base across all active notebooks...\n\n",
-	"✦ **Found 3 relevant references** in your workspace:\n",
-	"  • `Grimoire/The Arcane Architecture.md` (High relevance)\n",
-	"  • `Codex/Cross-Platform Sync.md`\n",
-	"  • `Journal/2026-10-24 Daily Reflection.md`\n\n",
-	"**Synthesis & Strategic Findings**:\n",
-	"1. **Pixel-Perfect Viewport:** Strict mathematical column/row budgeting prevents border breakage.\n",
-	"2. **Subtle Aesthetic:** Selection cursor uses an elegant left accent bar (`▌`) instead of abrasive blocks.\n",
-	"3. **Multi-Platform Zero Setup:** Seamless compilation for Windows and Apple Silicon Mac via GitLab.\n\n",
-	"*(Press [Esc] or [Ctrl+K] to close this drawer)*",
+func slideTick() tea.Cmd {
+	return tea.Tick(18*time.Millisecond, func(t time.Time) tea.Msg {
+		return slideTickMsg{}
+	})
+}
+
+func streamToken(token string, delay time.Duration) tea.Cmd {
+	return tea.Tick(delay, func(t time.Time) tea.Msg {
+		return aiStreamMsg(token)
+	})
+}
+
+var arcaneSpinners = []string{
+	"✦ ✧ ✦ ✧",
+	"✧ ✦ ✧ ✦",
+	"᚛ ᚜ ᚛ ᚜",
+	"᚜ ᚛ ᚜ ᚛",
+	"❖ ✦ ❖ ✦",
 }
 
 func sampleData() []Item {
@@ -168,18 +187,29 @@ Refer to [[Cross-Platform Sync]] for multi-machine workflows.`,
 			Content: `# 2026-10-24 Daily Reflection ☕
 
 Decided on the name **Tome**. 
-Polishing the UI: spacious browsing tree, zero line-wrapping, and smooth truncation with ellipsis.`,
+Designing the sliding AI research assistant drawer with smooth overlay mechanics.`,
 		},
 	}
 }
 
 func initialModel() Model {
 	items := sampleData()
+
+	ti := textinput.New()
+	ti.Placeholder = "Ask about your notes... (e.g. 'What did we decide on sync?')"
+	ti.CharLimit = 160
+	ti.Prompt = "✦ > "
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Bold(true)
+	ti.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright)
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
+
 	m := Model{
 		allItems:    items,
-		selectedIdx: 1, // Start on first note (The Arcane Architecture.md)
+		selectedIdx: 1,
 		activePane:  0,
-		statusMsg:   "Welcome to Tome • Press [A] for Cloud AI Assistant",
+		aiInput:     ti,
+		aiState:     "idle",
+		statusMsg:   "Welcome to Tome • Press [Ctrl+K] for Cloud AI Assistant",
 	}
 	m.rebuildVisible()
 	return m
@@ -222,15 +252,94 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recalculateViewport()
 		m.ready = true
 
-	case aiTokenMsg:
-		m.aiResponse += string(msg)
-		m.aiTokenIndex++
-		if m.aiTokenIndex < len(sampleAIStream) {
-			return m, streamNextToken(sampleAIStream[m.aiTokenIndex], 45*time.Millisecond)
+	// Slide-up animation tick
+	case slideTickMsg:
+		if m.sliding {
+			if m.slideDir > 0 {
+				// Sliding UP
+				m.animHeight += 4
+				if m.animHeight >= m.targetHeight {
+					m.animHeight = m.targetHeight
+					m.sliding = false
+					m.aiInput.Focus()
+				} else {
+					cmds = append(cmds, slideTick())
+				}
+			} else {
+				// Sliding DOWN
+				m.animHeight -= 4
+				if m.animHeight <= 0 {
+					m.animHeight = 0
+					m.sliding = false
+					m.aiOpen = false
+					m.aiInput.Blur()
+				} else {
+					cmds = append(cmds, slideTick())
+				}
+			}
 		}
-		m.aiStreaming = false
+
+	// Arcane Rune/Ember Spinner Tick
+	case animTickMsg:
+		if m.aiState == "thinking" {
+			m.aiAnimStep++
+			cmds = append(cmds, animTick())
+		}
+
+	case aiStartStreamMsg:
+		m.aiState = "streaming"
+		m.aiStreamIdx = 0
+		if len(m.aiStreamList) > 0 {
+			cmds = append(cmds, streamToken(m.aiStreamList[0], 35*time.Millisecond))
+		}
+
+	case aiStreamMsg:
+		m.aiResponse += string(msg)
+		m.aiStreamIdx++
+		if m.aiStreamIdx < len(m.aiStreamList) {
+			cmds = append(cmds, streamToken(m.aiStreamList[m.aiStreamIdx], 30*time.Millisecond))
+		} else {
+			m.aiState = "idle"
+		}
 
 	case tea.KeyMsg:
+		// If AI drawer is open, key events are captured by the AI drawer
+		if m.aiOpen && !m.sliding {
+			switch msg.String() {
+			case "esc", "ctrl+k":
+				// Start slide-down close
+				m.sliding = true
+				m.slideDir = -1
+				return m, slideTick()
+
+			case "enter":
+				query := strings.TrimSpace(m.aiInput.Value())
+				if query != "" && m.aiState == "idle" {
+					m.aiQuery = query
+					m.aiResponse = ""
+					m.aiState = "thinking"
+					m.aiAnimStep = 0
+					m.aiInput.SetValue("")
+
+					// Build smart contextual response tokens based on query
+					m.aiStreamList = buildAIResponse(query)
+
+					// Trigger thinking spinner and delay streaming start by 500ms
+					cmds = append(cmds, animTick(), tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+						return aiStartStreamMsg{}
+					}))
+					return m, tea.Batch(cmds...)
+				}
+			}
+
+			// Forward typing to text input
+			var tiCmd tea.Cmd
+			m.aiInput, tiCmd = m.aiInput.Update(msg)
+			cmds = append(cmds, tiCmd)
+			return m, tea.Batch(cmds...)
+		}
+
+		// Main navigation keys (when AI drawer is closed)
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -251,7 +360,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "enter", "space":
-			// Toggle folder expand/collapse if folder
 			if m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
 				actualIdx := m.visibleIndices[m.selectedIdx]
 				if m.allItems[actualIdx].IsFolder {
@@ -261,26 +369,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "ctrl+k":
-			// Toggle AI Assistant Drawer
-			m.aiOpen = !m.aiOpen
-			if m.aiOpen {
-				m.aiResponse = ""
-				m.aiTokenIndex = 0
-				m.aiStreaming = true
-				m.recalculateViewport()
-				return m, streamNextToken(sampleAIStream[0], 60*time.Millisecond)
-			} else {
-				m.recalculateViewport()
-			}
-
-		case "esc":
-			if m.aiOpen {
-				m.aiOpen = false
-				m.recalculateViewport()
-			}
+			// Open AI drawer with slide-up animation
+			m.aiOpen = true
+			m.sliding = true
+			m.slideDir = 1
+			m.animHeight = 4
+			m.targetHeight = max(12, int(float64(m.height)*0.65))
+			m.aiInput.Width = max(20, m.width-12)
+			return m, slideTick()
 		}
 
 	case tea.MouseMsg:
+		if m.aiOpen {
+			// Don't scroll background when drawer is open
+			return m, nil
+		}
+
 		usableWidth := max(20, m.width-2)
 		leftTotalWidth := max(34, min(52, usableWidth*36/100))
 
@@ -306,8 +410,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case tea.MouseLeft:
-			// Row 0: Title bar, Row 1: Divider, Row 2: Top Border of Pane
-			// Item 0 begins at Row 3
 			clickedRow := msg.Y - 3
 			if msg.X < leftTotalWidth && clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
 				if m.selectedIdx == clickedRow {
@@ -338,18 +440,13 @@ func (m *Model) recalculateViewport() {
 
 	headerHeight := 2
 	footerHeight := 1
-	aiHeight := 0
-	if m.aiOpen {
-		aiHeight = max(6, min(10, m.height/3))
-	}
-	// Panes fill the exact remaining vertical space down to the footer
-	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight)
+	// The background always renders at FULL height (no squishing!)
+	panesHeight := max(4, m.height-headerHeight-footerHeight)
 
 	usableWidth := max(20, m.width-2)
 	leftTotalWidth := max(34, min(52, usableWidth*36/100))
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
-	// Inner content dimensions (Borders take 2 vertical rows: top & bottom)
 	viewportWidth := max(10, rightTotalWidth-4)
 	viewportHeight := max(2, panesHeight-2)
 
@@ -384,7 +481,6 @@ func (m Model) renderActivePreview(width int) string {
 	return markdown.RenderDocument(item.Content, width)
 }
 
-// truncateWithDots truncates string with "..." strictly measuring terminal visual columns
 func truncateWithDots(s string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return ""
@@ -403,27 +499,55 @@ func truncateWithDots(s string, maxWidth int) string {
 	return string(runes) + "..."
 }
 
+// buildAIResponse generates contextual responses simulating cloud AI research
+func buildAIResponse(query string) []string {
+	q := strings.ToLower(query)
+
+	if strings.Contains(q, "sync") || strings.Contains(q, "mac") || strings.Contains(q, "laptop") || strings.Contains(q, "git") {
+		return []string{
+			"✦ **Found 1 primary reference** in your knowledge base:\n",
+			"  • `Codex/Cross-Platform Sync.md`\n\n",
+			"**Synthesized Guidance**:\n",
+			"• **Single Pipeline:** Push code from your home Windows PC to your private GitLab repo.\n",
+			"• **Automated Runner:** GitLab CI/CD builds both `tome.exe` and `tome-darwin-arm64` in parallel.\n",
+			"• **Zero Dependencies:** On your work MacBook, you download the compiled binary without installing Go or build tools.\n",
+		}
+	}
+
+	if strings.Contains(q, "arch") || strings.Contains(q, "speed") || strings.Contains(q, "perf") || strings.Contains(q, "go") {
+		return []string{
+			"✦ **Found 1 primary reference** in your knowledge base:\n",
+			"  • `Grimoire/The Arcane Architecture.md`\n\n",
+			"**Architecture Review**:\n",
+			"• **Sub-10ms Startup:** Compiled Go binary loads instantly compared to script interpretation.\n",
+			"• **60 FPS Fluidity:** Bubbletea event loop delivers rock-solid Yazi-style hover mouse wheel navigation.\n",
+			"• **Headless Cloud AI:** Goroutines stream Gemini/Claude tokens in the background without UI stutters.\n",
+		}
+	}
+
+	return []string{
+		fmt.Sprintf("✦ **Researching across all notes for:** \"%s\"\n\n", query),
+		"• Scanned `Grimoire/`, `Codex/`, and `Journal/`.\n",
+		"• Identified key principles: strict viewport containment, 24-bit TrueColor flame palette, and zero runtime dependencies.\n",
+		"• Ready to connect to your live Gemini / Claude API key for deep cross-note semantic synthesis.\n",
+	}
+}
+
 func (m Model) View() string {
 	if !m.ready || m.width <= 0 || m.height <= 0 {
 		return "\n  Summoning Tome..."
 	}
 
-	// 1. Exact Screen Height Budgeting
+	usableWidth := max(20, m.width-2)
 	headerHeight := 2
 	footerHeight := 1
-	aiHeight := 0
-	if m.aiOpen {
-		aiHeight = max(6, min(10, m.height/3))
-	}
-	// PanesHeight exactly spans from header to footer: Header(2) + PanesHeight + AI(aiHeight) + Footer(1) == m.height
-	panesHeight := max(4, m.height-headerHeight-footerHeight-aiHeight)
-	panesContentHeight := panesHeight - 2 // Top border (1) + bottom border (1) = 2
+	panesHeight := max(4, m.height-headerHeight-footerHeight)
+	panesContentHeight := panesHeight - 2
 
-	usableWidth := max(20, m.width-2) // 2-char margin prevents auto-wrap
 	leftTotalWidth := max(34, min(52, usableWidth*36/100))
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
-	// 2. Header Banner (Exactly 2 rows)
+	// 1. Header Banner
 	titleGradient := ui.Gradient("❖  T O M E", "#FF4500", "#FFD166")
 	bannerLeft := fmt.Sprintf("✦ %s ❖ %s", titleGradient, ui.SubtitleStyle.Render("The Arcane Terminal Notebook"))
 
@@ -438,18 +562,16 @@ func (m Model) View() string {
 	row2 := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", usableWidth))
 	headerBlock := lipgloss.JoinVertical(lipgloss.Left, row1, row2)
 
-	// 3. Tree Pane (Left)
-	innerLeftWidth := leftTotalWidth - 4 // Content width inside borders & padding
+	// 2. Tree Pane (Left)
+	innerLeftWidth := leftTotalWidth - 4
 	var treeLines []string
-
 	availTitleWidth := max(4, innerLeftWidth-2)
 	maxVisibleRows := panesContentHeight
 
 	for i, visIdx := range m.visibleIndices {
 		if len(treeLines) >= maxVisibleRows {
-			break // Strictly ensure treeLines never exceeds pane content height
+			break
 		}
-
 		item := m.allItems[visIdx]
 
 		treeBranch := ""
@@ -466,13 +588,10 @@ func (m Model) View() string {
 			}
 		}
 
-		// Truncate cleanly with "..." if title exceeds available columns
 		rawTitle := truncateWithDots(treeBranch+icon+item.Title, availTitleWidth)
-		// Crucial: Replace spaces with non-breaking spaces (\u00a0) so Lipgloss NEVER word-wraps!
 		noBreakTitle := strings.ReplaceAll(rawTitle, " ", "\u00a0")
 
 		if i == m.selectedIdx {
-			// Single unbreakable line: Flame orange cursor bar + text
 			cursor := ui.TreeCursor.Render("▌") + "\u00a0"
 			titlePill := ui.TreeSelectedText.Render(noBreakTitle)
 			treeLines = append(treeLines, cursor+titlePill)
@@ -492,13 +611,12 @@ func (m Model) View() string {
 	if m.activePane == 0 {
 		leftStyle = ui.ActivePaneStyle
 	}
-	// Content height is panesContentHeight. With 2 border rows, total rendered box is exactly panesHeight!
 	leftView := leftStyle.
 		Width(leftTotalWidth - 4).
 		Height(panesContentHeight).
 		Render(strings.Join(treeLines, "\n"))
 
-	// 4. Preview Pane (Right)
+	// 3. Preview Pane (Right)
 	rightStyle := ui.PaneStyle
 	if m.activePane == 1 {
 		rightStyle = ui.ActivePaneStyle
@@ -508,71 +626,121 @@ func (m Model) View() string {
 		Height(panesContentHeight).
 		Render(m.viewport.View())
 
-	// Horizontal side-by-side join (total height = panesHeight)
+	// 4. Combine Full Background (Undisturbed!)
 	panesView := lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
 
-	// 5. AI Research Drawer (if active)
-	var aiView string
+	// 5. Footer Bar
+	var footer string
 	if m.aiOpen {
-		statusIndicator := "✦ TOME AI RESEARCHER (Headless Cloud) ─ [Streaming...]"
-		if !m.aiStreaming {
-			statusIndicator = "✦ TOME AI RESEARCHER (Headless Cloud) ─ [Ready]  (Esc or Ctrl+K to close)"
-		}
-		titleBar := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(ui.ColorAmberGold).
-			Render(statusIndicator)
-
-		aiContentHeight := max(4, aiHeight-2)
-		innerAIWidth := usableWidth - 4
-
-		// Format AI response lines strictly so they fit inside drawer height without wrapping
-		rawContent := titleBar + "\n" + m.aiResponse
-		aiLines := strings.Split(rawContent, "\n")
-		if len(aiLines) > aiContentHeight {
-			aiLines = aiLines[:aiContentHeight]
-		}
-		for idx, line := range aiLines {
-			if lipgloss.Width(line) > innerAIWidth {
-				aiLines[idx] = truncateWithDots(line, innerAIWidth)
-			}
-		}
-		clampedAIContent := strings.Join(aiLines, "\n")
-
-		aiView = ui.AIDrawerStyle.
-			Width(innerAIWidth).
-			Height(aiContentHeight).
-			MaxHeight(aiHeight).
-			Render(clampedAIContent)
+		kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Ask AI  ")
+		kClose := ui.FooterKeyStyle.Render("[Esc/Ctrl+K]") + ui.FooterDescStyle.Render(" Close Assistant  ")
+		kQuit := ui.FooterKeyStyle.Render("[Ctrl+C]") + ui.FooterDescStyle.Render(" Quit")
+		footer = " " + kEnter + kClose + kQuit
+	} else {
+		kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Navigate  ")
+		kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Toggle Folder  ")
+		kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
+		kTab := ui.FooterKeyStyle.Render("[Tab]") + ui.FooterDescStyle.Render(" Switch Pane  ")
+		kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
+		footer = " " + kNav + kExp + kAi + kTab + kQuit
 	}
-
-	// 6. 1-Row Footer (Affixed to the bottom of the screen)
-	kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Navigate  ")
-	kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Toggle Folder  ")
-	kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
-	kTab := ui.FooterKeyStyle.Render("[Tab]") + ui.FooterDescStyle.Render(" Switch Pane  ")
-	kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
-	footer := " " + kNav + kExp + kAi + kTab + kQuit
 	if lipgloss.Width(footer) > usableWidth {
 		footer = footer[:usableWidth]
 	}
 
-	// 7. Compose View
-	var fullScreen string
-	if m.aiOpen {
-		fullScreen = lipgloss.JoinVertical(lipgloss.Left, headerBlock, panesView, aiView, footer)
-	} else {
-		fullScreen = lipgloss.JoinVertical(lipgloss.Left, headerBlock, panesView, footer)
+	// 6. Base Full-Screen Background
+	fullScreen := lipgloss.JoinVertical(lipgloss.Left, headerBlock, panesView, footer)
+	bgLines := strings.Split(fullScreen, "\n")
+
+	// 7. Layered Sliding AI Drawer (Overlays directly on top of background!)
+	if m.aiOpen && m.animHeight > 0 {
+		drawerInnerWidth := usableWidth - 4
+		drawerContentHeight := max(2, m.animHeight-2)
+
+		// Header of the drawer
+		statusText := "✦ TOME KNOWLEDGE RESEARCHER ────────────────────────────── [Esc: Close]"
+		if m.aiState == "thinking" {
+			spinRune := arcaneSpinners[m.aiAnimStep%len(arcaneSpinners)]
+			statusText = fmt.Sprintf("✦ TOME RESEARCHER [ %s Communing with the Grimoire... ]", spinRune)
+		} else if m.aiState == "streaming" {
+			statusText = "✦ TOME RESEARCHER [ ✦ Streaming Wisdom from Cloud AI... ]"
+		}
+
+		drawerTitle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ui.ColorAmberGold).
+			Render(statusText)
+
+		// Question input prompt
+		inputRow := m.aiInput.View()
+
+		// Answer area
+		var answerArea string
+		if m.aiResponse != "" {
+			answerArea = m.aiResponse
+		} else if m.aiQuery != "" && m.aiState == "thinking" {
+			spinRune := arcaneSpinners[m.aiAnimStep%len(arcaneSpinners)]
+			pulseBar := ui.Gradient("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "#FF4500", "#FFD166")
+			answerArea = fmt.Sprintf("\n  %s Investigating your question across all notes...\n  %s", spinRune, pulseBar)
+		} else {
+			answerArea = ui.SubtitleStyle.Render("\n  Type any question about your notes above and press [Enter] to research.")
+		}
+
+		// Stack drawer content
+		drawerContent := fmt.Sprintf("%s\n\n%s\n%s", drawerTitle, inputRow, answerArea)
+
+		// Strict line formatting so drawer content never exceeds drawerContentHeight
+		rawLines := strings.Split(drawerContent, "\n")
+		var clampedLines []string
+		for idx, l := range rawLines {
+			if idx >= drawerContentHeight {
+				break
+			}
+			if lipgloss.Width(l) > drawerInnerWidth {
+				l = truncateWithDots(l, drawerInnerWidth)
+			}
+			// Pad line with spaces so drawer is opaque over background!
+			pad := max(0, drawerInnerWidth-lipgloss.Width(l))
+			clampedLines = append(clampedLines, l+strings.Repeat(" ", pad))
+		}
+		for len(clampedLines) < drawerContentHeight {
+			clampedLines = append(clampedLines, strings.Repeat(" ", drawerInnerWidth))
+		}
+
+		aiBoxStyle := lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(ui.ColorFlameOrange).
+			Background(ui.ColorDarkSlate).
+			Padding(0, 1)
+
+		aiDrawerRendered := aiBoxStyle.
+			Width(drawerInnerWidth).
+			Height(drawerContentHeight).
+			Render(strings.Join(clampedLines, "\n"))
+
+		drawerLines := strings.Split(aiDrawerRendered, "\n")
+
+		// Overlap calculation: overlay drawer directly over the bottom rows of the background (above footer)
+		footerRow := len(bgLines) - 1
+		startRow := footerRow - len(drawerLines)
+		if startRow < 2 {
+			startRow = 2
+		}
+
+		for i, dLine := range drawerLines {
+			targetRow := startRow + i
+			if targetRow >= 0 && targetRow < footerRow {
+				bgLines[targetRow] = dLine
+			}
+		}
 	}
 
-	// 8. Absolute Guarantee: Exactly fits m.height without emitting extra newlines
-	lines := strings.Split(fullScreen, "\n")
-	if len(lines) > m.height && m.height > 2 {
-		lines = lines[:m.height]
-		fullScreen = strings.Join(lines, "\n")
+	// 8. Output lines strictly clamped to terminal height
+	if len(bgLines) > m.height && m.height > 2 {
+		bgLines = bgLines[:m.height]
 	}
 
-	return fullScreen
+	return strings.Join(bgLines, "\n")
 }
 
 func main() {
