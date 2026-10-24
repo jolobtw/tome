@@ -6,7 +6,8 @@
 *.dylib
 bin/
 dist/
-tome
+/tome
+
 
 # OS & Editor
 .DS_Store
