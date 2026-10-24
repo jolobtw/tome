@@ -8,6 +8,35 @@ import (
 	"tome/internal/ui"
 )
 
+// wrapText breaks a string into lines that do not exceed maxWidth visual columns
+func wrapText(text string, maxWidth int) []string {
+	if maxWidth <= 0 {
+		return []string{text}
+	}
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+
+	var lines []string
+	var currentLine string
+
+	for _, word := range words {
+		if currentLine == "" {
+			currentLine = word
+		} else if lipgloss.Width(currentLine+" "+word) <= maxWidth {
+			currentLine += " " + word
+		} else {
+			lines = append(lines, currentLine)
+			currentLine = word
+		}
+	}
+	if currentLine != "" {
+		lines = append(lines, currentLine)
+	}
+	return lines
+}
+
 // RenderDocument converts raw markdown text into styled terminal ANSI lines with given width
 func RenderDocument(raw string, width int) string {
 	if width < 24 {
@@ -45,11 +74,9 @@ func RenderDocument(raw string, width int) string {
 		}
 
 		if inCodeBlock {
-			// Code content with matching left and right borders
 			leftBar := codeBorderStyle.Render("  │  ")
 			rightBar := codeBorderStyle.Render("│")
 
-			// Truncate or pad to box width
 			availCodeWidth := max(4, boxWidth-6)
 			displayCode := line
 			if lipgloss.Width(displayCode) > availCodeWidth {
@@ -62,7 +89,7 @@ func RenderDocument(raw string, width int) string {
 			continue
 		}
 
-		// 2. Obsidian Callouts: Sleek accent-bar style matching Obsidian Desktop
+		// 2. Obsidian Callouts: Left accent bar down every wrapped line
 		if strings.HasPrefix(trimmed, "> [!NOTE]") || strings.HasPrefix(trimmed, "> [!INFO]") {
 			currentCalloutColor = ui.ColorCyan
 			bar := lipgloss.NewStyle().Foreground(currentCalloutColor).Bold(true).Render("  ▎ ")
@@ -95,8 +122,13 @@ func RenderDocument(raw string, width int) string {
 			content := strings.TrimPrefix(line, ">")
 			content = strings.TrimPrefix(content, " ")
 			bar := lipgloss.NewStyle().Foreground(currentCalloutColor).Render("  ▎ ")
-			text := lipgloss.NewStyle().Foreground(ui.ColorTextRegular).Render(formatInlineText(content))
-			rendered = append(rendered, bar+text)
+			textStyle := lipgloss.NewStyle().Foreground(ui.ColorTextRegular)
+
+			availWidth := max(10, width-8)
+			wrapped := wrapText(formatInlineText(content), availWidth)
+			for _, wLine := range wrapped {
+				rendered = append(rendered, bar+textStyle.Render(wLine))
+			}
 			continue
 		}
 
@@ -142,33 +174,70 @@ func RenderDocument(raw string, width int) string {
 			continue
 		}
 
-		// 5. Checklists
+		// 5. Checklists (with proper indented wrapping)
 		if strings.HasPrefix(trimmed, "- [x]") || strings.HasPrefix(trimmed, "* [x]") {
 			body := strings.TrimPrefix(trimmed[5:], " ")
 			chk := lipgloss.NewStyle().Foreground(ui.ColorGreen).Bold(true).Render("  ✔ ")
-			rendered = append(rendered, chk+lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render(body))
+			indent := "    "
+			textStyle := lipgloss.NewStyle().Foreground(ui.ColorTextMuted)
+
+			availWidth := max(10, width-8)
+			wrapped := wrapText(formatInlineText(body), availWidth)
+			for idx, wLine := range wrapped {
+				if idx == 0 {
+					rendered = append(rendered, chk+textStyle.Render(wLine))
+				} else {
+					rendered = append(rendered, indent+textStyle.Render(wLine))
+				}
+			}
 			continue
 		}
 		if strings.HasPrefix(trimmed, "- [ ]") || strings.HasPrefix(trimmed, "* [ ]") {
 			body := strings.TrimPrefix(trimmed[5:], " ")
 			unchk := lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render("  ○ ")
-			rendered = append(rendered, unchk+lipgloss.NewStyle().Foreground(ui.ColorTextRegular).Render(body))
+			indent := "    "
+			textStyle := lipgloss.NewStyle().Foreground(ui.ColorTextRegular)
+
+			availWidth := max(10, width-8)
+			wrapped := wrapText(formatInlineText(body), availWidth)
+			for idx, wLine := range wrapped {
+				if idx == 0 {
+					rendered = append(rendered, unchk+textStyle.Render(wLine))
+				} else {
+					rendered = append(rendered, indent+textStyle.Render(wLine))
+				}
+			}
 			continue
 		}
 
-		// 6. Bullet lists
+		// 6. Bullet lists (with proper indented wrapping)
 		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
 			body := trimmed[2:]
 			bullet := lipgloss.NewStyle().Foreground(ui.ColorAmberGold).Render("  • ")
-			rendered = append(rendered, bullet+formatInlineText(body))
+			indent := "    "
+			textStyle := lipgloss.NewStyle().Foreground(ui.ColorTextRegular)
+
+			availWidth := max(10, width-8)
+			wrapped := wrapText(formatInlineText(body), availWidth)
+			for idx, wLine := range wrapped {
+				if idx == 0 {
+					rendered = append(rendered, bullet+textStyle.Render(wLine))
+				} else {
+					rendered = append(rendered, indent+textStyle.Render(wLine))
+				}
+			}
 			continue
 		}
 
-		// 7. Regular text (with inline formatting)
+		// 7. Regular paragraph text (word-wrapped cleanly inside viewport)
 		if trimmed == "" {
 			rendered = append(rendered, "")
 		} else {
-			rendered = append(rendered, "  "+formatInlineText(line))
+			availWidth := max(10, width-6)
+			wrapped := wrapText(formatInlineText(line), availWidth)
+			for _, wLine := range wrapped {
+				rendered = append(rendered, "  "+wLine)
+			}
 		}
 	}
 
