@@ -807,13 +807,7 @@ func (m Model) View() string {
 
 	// 3. Preview/Editor Pane (Right)
 	rightStyle := ui.PaneStyle
-	if m.inEditMode {
-		rightStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ui.ColorFlameOrange).
-			Background(ui.ColorDarkSlate).
-			Padding(0, 1)
-	} else if m.activePane == 1 {
+	if m.inEditMode || m.activePane == 1 {
 		rightStyle = ui.ActivePaneStyle
 	}
 
