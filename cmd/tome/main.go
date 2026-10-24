@@ -587,6 +587,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.saveStatus = ""
 						m.editor.SetValue(normalized)
 						cmd := m.editor.Focus()
+						m.editor, _ = m.editor.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
 						return m, cmd
 					}
 				}
@@ -640,14 +641,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inEditMode {
 			switch msg.Type {
 			case tea.MouseWheelUp:
+				upMsg := tea.KeyMsg{Type: tea.KeyUp}
 				for i := 0; i < 3; i++ {
-					m.editor.CursorUp()
+					m.editor, _ = m.editor.Update(upMsg)
 				}
 				return m, nil
 
 			case tea.MouseWheelDown:
+				downMsg := tea.KeyMsg{Type: tea.KeyDown}
 				for i := 0; i < 3; i++ {
-					m.editor.CursorDown()
+					m.editor, _ = m.editor.Update(downMsg)
 				}
 				return m, nil
 
@@ -1436,7 +1439,9 @@ func (m *Model) confirmNewNote() tea.Cmd {
 	m.activeNotePath = targetPath
 	m.saveStatus = ""
 	m.editor.SetValue(initialContent)
-	return m.editor.Focus()
+	focusCmd := m.editor.Focus()
+	m.editor, _ = m.editor.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+	return focusCmd
 }
 
 func (m *Model) confirmNewFolder() {
@@ -1552,13 +1557,16 @@ func handleEditorClick(ta *textarea.Model, targetX, targetY int) {
 		return
 	}
 
+	upMsg := tea.KeyMsg{Type: tea.KeyUp}
+	downMsg := tea.KeyMsg{Type: tea.KeyDown}
+
 	if targetY > curVisualRow {
 		for i := 0; i < targetY-curVisualRow; i++ {
-			ta.CursorDown()
+			*ta, _ = ta.Update(downMsg)
 		}
 	} else if targetY < curVisualRow {
 		for i := 0; i < curVisualRow-targetY; i++ {
-			ta.CursorUp()
+			*ta, _ = ta.Update(upMsg)
 		}
 	}
 
