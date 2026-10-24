@@ -39,6 +39,11 @@ type Model struct {
 	saveStatus     string
 	lastClickTime  time.Time
 
+	// Floating Modal System (New Note, New Folder, Quick Log)
+	modalType     string // "", "new_note", "new_folder", "quick_log"
+	modalInput    textinput.Model
+	modalDestPath string
+
 	// Interactive AI Knowledge Assistant
 	aiOpen       bool
 	aiInput      textinput.Model
@@ -145,6 +150,13 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 	ta.BlurredStyle = editorStyle
 	ta.Cursor.Style = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange)
 
+	mi := textinput.New()
+	mi.Prompt = "✦ > "
+	mi.PromptStyle = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Bold(true)
+	mi.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright)
+	mi.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
+	mi.CharLimit = 80
+
 	m := Model{
 		config:        cfg,
 		workspacePath: workspacePath,
@@ -156,6 +168,7 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 		editor:        ta,
 		aiInput:       ti,
 		aiState:       "idle",
+		modalInput:    mi,
 		statusMsg:     "Welcome to Tome • Press [Ctrl+K] for Cloud AI Assistant",
 	}
 
@@ -305,6 +318,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		// When a floating modal is open, route keys to the modal dialog
+		if m.modalType != "" {
+			switch msg.String() {
+			case "esc":
+				m.modalType = ""
+				m.modalInput.Blur()
+				return m, nil
+
+			case "enter":
+				switch m.modalType {
+				case "new_note":
+					cmd := m.confirmNewNote()
+					return m, cmd
+				case "new_folder":
+					m.confirmNewFolder()
+					return m, nil
+				case "quick_log":
+					m.confirmQuickLog()
+					return m, nil
+				}
+				m.modalType = ""
+				m.modalInput.Blur()
+				return m, nil
+			}
+
+			var tiCmd tea.Cmd
+			m.modalInput, tiCmd = m.modalInput.Update(msg)
+			return m, tiCmd
+		}
+
 		// When in in-place note editor mode, route keys directly to editor
 		if m.inEditMode {
 			switch msg.String() {
@@ -481,6 +524,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case "n":
+			m.openNewNoteModal()
+			return m, m.modalInput.Focus()
+
+		case "f":
+			m.openNewFolderModal()
+			return m, m.modalInput.Focus()
+
+		case "l":
+			m.openQuickLogModal()
+			return m, m.modalInput.Focus()
+
 		case "ctrl+k":
 			m.aiOpen = true
 			m.sliding = true
@@ -492,7 +547,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		if m.aiOpen {
+		if m.modalType != "" || m.aiOpen {
 			return m, nil
 		}
 
@@ -854,7 +909,11 @@ func (m Model) View() string {
 
 	// 5. Footer Bar
 	var footer string
-	if m.inEditMode {
+	if m.modalType != "" {
+		kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Confirm  ")
+		kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Cancel")
+		footer = " ✦ Modal Prompt │ " + kEnter + kClose
+	} else if m.inEditMode {
 		kSave := ui.FooterKeyStyle.Render("[Ctrl+S]") + ui.FooterDescStyle.Render(" Save  ")
 		kDone := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Save & Finish  ")
 		kDiscard := ui.FooterKeyStyle.Render("[Ctrl+Q]") + ui.FooterDescStyle.Render(" Discard")
@@ -875,11 +934,13 @@ func (m Model) View() string {
 	} else {
 		kNav := ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  ")
 		kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  ")
-		kEdit := ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit Note  ")
+		kEdit := ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  ")
+		kNew := ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New Note  ")
+		kFolder := ui.FooterKeyStyle.Render("[F]") + ui.FooterDescStyle.Render(" Folder  ")
+		kLog := ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  ")
 		kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
-		kTab := ui.FooterKeyStyle.Render("[Tab]") + ui.FooterDescStyle.Render(" Switch Pane  ")
 		kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
-		footer = " " + kNav + kExp + kEdit + kAi + kTab + kQuit
+		footer = " " + kNav + kExp + kEdit + kNew + kFolder + kLog + kAi + kQuit
 	}
 	if lipgloss.Width(footer) > usableWidth {
 		footer = footer[:usableWidth]
@@ -968,7 +1029,76 @@ func (m Model) View() string {
 		}
 	}
 
-	// 8. Output lines strictly clamped to terminal height
+	// 8. Layered Floating Modal Overlay (New Note, New Folder, Quick Log)
+	if m.modalType != "" {
+		modalWidth := min(58, usableWidth-4)
+		var title string
+		var subLabel string
+		var actionHint string
+
+		homeDir, _ := os.UserHomeDir()
+		friendlyDest := m.modalDestPath
+		if strings.HasPrefix(friendlyDest, homeDir) {
+			friendlyDest = "~" + strings.TrimPrefix(friendlyDest, homeDir)
+		}
+
+		switch m.modalType {
+		case "new_note":
+			title = ui.Gradient("✦  C R E A T E   N E W   N O T E", "#FF4500", "#FFD166")
+			subLabel = fmt.Sprintf("󰉋 Saving in: %s", friendlyDest)
+			actionHint = "[Enter] Create & Open Editor  •  [Esc] Cancel"
+		case "new_folder":
+			title = ui.Gradient("✦  C R E A T E   N E W   F O L D E R", "#FF4500", "#FFD166")
+			subLabel = fmt.Sprintf("󰉋 Location: %s", friendlyDest)
+			actionHint = "[Enter] Create Folder  •  [Esc] Cancel"
+		case "quick_log":
+			title = ui.Gradient("✦  Q U I C K   D A I L Y   L O G", "#FF4500", "#FFD166")
+			today := time.Now().Format("2006-01-02")
+			subLabel = fmt.Sprintf("󰈙 Appending to: %s-quick-log.md", today)
+			actionHint = "[Enter] Save Log Entry  •  [Esc] Cancel"
+		}
+
+		m.modalInput.Width = max(20, modalWidth-10)
+		inputBox := m.modalInput.View()
+
+		subStyle := ui.SubtitleStyle.Render(subLabel)
+		hintStyle := ui.SubtitleStyle.Render(actionHint)
+
+		ruleLen := max(10, modalWidth-8)
+		rule := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", ruleLen))
+
+		modalContent := lipgloss.JoinVertical(
+			lipgloss.Left,
+			title,
+			subStyle,
+			rule,
+			"",
+			inputBox,
+			"",
+			rule,
+			hintStyle,
+		)
+
+		modalBoxStyle := lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(ui.ColorFlameOrange).
+			Background(ui.ColorSelectBg).
+			Padding(1, 2)
+
+		modalRendered := modalBoxStyle.Width(modalWidth - 6).Render(modalContent)
+		modalLines := strings.Split(modalRendered, "\n")
+		modalHeight := len(modalLines)
+		startRow := max(2, (m.height-modalHeight)/2)
+
+		for rIdx, mLine := range modalLines {
+			targetRow := startRow + rIdx
+			if targetRow >= 0 && targetRow < len(bgLines)-1 {
+				bgLines[targetRow] = lipgloss.PlaceHorizontal(usableWidth, lipgloss.Center, mLine)
+			}
+		}
+	}
+
+	// 9. Output lines strictly clamped to terminal height
 	if len(bgLines) > m.height && m.height > 2 {
 		bgLines = bgLines[:m.height]
 	}
@@ -1000,4 +1130,219 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func slugify(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var sb strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			sb.WriteRune(r)
+		} else if r == ' ' {
+			sb.WriteRune('-')
+		}
+	}
+	res := sb.String()
+	for strings.Contains(res, "--") {
+		res = strings.ReplaceAll(res, "--", "-")
+	}
+	return strings.Trim(res, "-_")
+}
+
+func (m Model) getDestinationDir() string {
+	if m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
+		actualID := m.visibleIndices[m.selectedIdx]
+		for idx := range m.allNodes {
+			if m.allNodes[idx].ID == actualID {
+				if m.allNodes[idx].IsFolder {
+					return m.allNodes[idx].Path
+				}
+				return filepath.Dir(m.allNodes[idx].Path)
+			}
+		}
+	}
+	return m.workspacePath
+}
+
+func (m *Model) openNewNoteModal() {
+	m.modalType = "new_note"
+	m.modalDestPath = m.getDestinationDir()
+	m.modalInput.Reset()
+	m.modalInput.Placeholder = "Note title (e.g. Arcane Secrets)"
+	m.modalInput.Focus()
+}
+
+func (m *Model) openNewFolderModal() {
+	m.modalType = "new_folder"
+	m.modalDestPath = m.getDestinationDir()
+	m.modalInput.Reset()
+	m.modalInput.Placeholder = "Folder name (e.g. Campaign Lore)"
+	m.modalInput.Focus()
+}
+
+func (m *Model) openQuickLogModal() {
+	m.modalType = "quick_log"
+	m.modalDestPath = m.workspacePath
+	m.modalInput.Reset()
+	m.modalInput.Placeholder = "What's on your mind? (Enter to save)"
+	m.modalInput.Focus()
+}
+
+func (m *Model) confirmNewNote() tea.Cmd {
+	title := strings.TrimSpace(m.modalInput.Value())
+	if title == "" {
+		m.modalType = ""
+		m.modalInput.Blur()
+		return nil
+	}
+
+	slug := slugify(title)
+	if slug == "" {
+		slug = "untitled"
+	}
+
+	now := time.Now()
+	datePrefix := now.Format("2006-01-02")
+	fileName := fmt.Sprintf("%s-%s.md", datePrefix, slug)
+	targetPath := filepath.Join(m.modalDestPath, fileName)
+
+	// Avoid overwriting existing notes with same name
+	counter := 1
+	for {
+		if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+			break
+		}
+		fileName = fmt.Sprintf("%s-%s-%d.md", datePrefix, slug, counter)
+		targetPath = filepath.Join(m.modalDestPath, fileName)
+		counter++
+	}
+
+	timestamp := now.Format("2006-01-02 15:04")
+	initialContent := fmt.Sprintf("---\ntitle: %q\ndate: %s\ntags:\n  - note\n---\n\n# %s\n\n", title, timestamp, title)
+
+	if err := os.WriteFile(targetPath, []byte(initialContent), 0644); err != nil {
+		m.modalType = ""
+		m.modalInput.Blur()
+		return nil
+	}
+
+	// Rescan tree and select the new note
+	nodes, isObs, _ := notes.ScanTree(m.workspacePath, m.config.SortMode)
+	m.allNodes = nodes
+	m.isObsidian = isObs
+
+	// Automatically expand parent folder if needed
+	for idx := range m.allNodes {
+		if m.allNodes[idx].IsFolder && strings.HasPrefix(targetPath, m.allNodes[idx].Path) {
+			m.allNodes[idx].Expanded = true
+		}
+	}
+
+	m.rebuildVisible()
+
+	// Find the new note in visible indices and select it
+	for vIdx, id := range m.visibleIndices {
+		for idx := range m.allNodes {
+			if m.allNodes[idx].ID == id && m.allNodes[idx].Path == targetPath {
+				m.selectedIdx = vIdx
+				break
+			}
+		}
+	}
+
+	// Close modal and immediately open in-place editor!
+	m.modalType = ""
+	m.modalInput.Blur()
+	m.inEditMode = true
+	m.activePane = 1
+	m.activeNotePath = targetPath
+	m.saveStatus = ""
+	m.editor.SetValue(initialContent)
+	return m.editor.Focus()
+}
+
+func (m *Model) confirmNewFolder() {
+	name := strings.TrimSpace(m.modalInput.Value())
+	if name == "" {
+		m.modalType = ""
+		m.modalInput.Blur()
+		return
+	}
+
+	targetPath := filepath.Join(m.modalDestPath, name)
+	_ = os.MkdirAll(targetPath, 0755)
+
+	nodes, isObs, _ := notes.ScanTree(m.workspacePath, m.config.SortMode)
+	m.allNodes = nodes
+	m.isObsidian = isObs
+
+	// Automatically expand parent folder if needed
+	for idx := range m.allNodes {
+		if m.allNodes[idx].IsFolder && strings.HasPrefix(targetPath, m.allNodes[idx].Path) {
+			m.allNodes[idx].Expanded = true
+		}
+	}
+
+	m.rebuildVisible()
+
+	// Select the newly created folder
+	for vIdx, id := range m.visibleIndices {
+		for idx := range m.allNodes {
+			if m.allNodes[idx].ID == id && m.allNodes[idx].Path == targetPath {
+				m.selectedIdx = vIdx
+				break
+			}
+		}
+	}
+
+	m.modalType = ""
+	m.modalInput.Blur()
+	m.updateViewportPreview()
+}
+
+func (m *Model) confirmQuickLog() {
+	text := strings.TrimSpace(m.modalInput.Value())
+	if text == "" {
+		m.modalType = ""
+		m.modalInput.Blur()
+		return
+	}
+
+	now := time.Now()
+	dateStr := now.Format("2006-01-02")
+	timeStr := now.Format("15:04")
+	fileName := fmt.Sprintf("%s-quick-log.md", dateStr)
+	targetPath := filepath.Join(m.workspacePath, fileName)
+
+	// Create file with header if it doesn't exist yet
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		header := fmt.Sprintf("# Daily Quick Log (%s)\n\n", dateStr)
+		_ = os.WriteFile(targetPath, []byte(header), 0644)
+	}
+
+	// Append log line
+	f, err := os.OpenFile(targetPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err == nil {
+		_, _ = f.WriteString(fmt.Sprintf("- **[%s]** %s\n", timeStr, text))
+		_ = f.Close()
+	}
+
+	nodes, isObs, _ := notes.ScanTree(m.workspacePath, m.config.SortMode)
+	m.allNodes = nodes
+	m.isObsidian = isObs
+	m.rebuildVisible()
+
+	// Select the quick log note so user sees it previewed immediately
+	for vIdx, id := range m.visibleIndices {
+		for idx := range m.allNodes {
+			if m.allNodes[idx].ID == id && m.allNodes[idx].Path == targetPath {
+				m.selectedIdx = vIdx
+				break
+			}
+		}
+	}
+
+	m.modalType = ""
+	m.modalInput.Blur()
+	m.updateViewportPreview()
 }
