@@ -40,10 +40,14 @@ type Model struct {
 	saveStatus     string
 	lastClickTime  time.Time
 
-	// Floating Modal System (New Note, New Folder, Quick Log)
-	modalType     string // "", "new_note", "new_folder", "quick_log"
-	modalInput    textinput.Model
-	modalDestPath string
+	// Floating Modal System (New Note, New Folder, Quick Log, Rename, Delete, Move)
+	modalType       string // "", "new_note", "new_folder", "quick_log", "rename", "delete", "move"
+	modalInput      textinput.Model
+	modalDestPath   string
+	modalTargetItem *notes.Node
+	modalError      string
+	moveFolders     []string
+	moveSelected    int
 
 	// Interactive AI Knowledge Assistant
 	aiOpen       bool
@@ -353,8 +357,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "esc":
 				m.modalType = ""
+				m.modalError = ""
+				m.modalTargetItem = nil
 				m.modalInput.Blur()
 				return m, nil
+
+			case "up", "k", "w":
+				if m.modalType == "move" {
+					if m.moveSelected > 0 {
+						m.moveSelected--
+					}
+					return m, nil
+				}
+
+			case "down", "j", "s":
+				if m.modalType == "move" {
+					if m.moveSelected < len(m.moveFolders)-1 {
+						m.moveSelected++
+					}
+					return m, nil
+				}
+
+			case "y", "Y":
+				if m.modalType == "delete" {
+					m.confirmDelete()
+					return m, nil
+				}
+
+			case "n", "N":
+				if m.modalType == "delete" {
+					m.modalType = ""
+					m.modalError = ""
+					m.modalTargetItem = nil
+					return m, nil
+				}
 
 			case "enter":
 				switch m.modalType {
@@ -367,9 +403,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "quick_log":
 					m.confirmQuickLog()
 					return m, nil
+				case "rename":
+					m.confirmRename()
+					return m, nil
+				case "delete":
+					m.confirmDelete()
+					return m, nil
+				case "move":
+					m.confirmMove()
+					return m, nil
 				}
 				m.modalType = ""
 				m.modalInput.Blur()
+				return m, nil
+			}
+
+			if m.modalType == "delete" || m.modalType == "move" {
+				// Don't send other keys to modalInput when in delete or move modals
 				return m, nil
 			}
 
@@ -633,6 +683,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "l":
 			m.openQuickLogModal()
 			return m, m.modalInput.Focus()
+
+		case "r":
+			m.openRenameModal()
+			if m.modalType == "rename" {
+				return m, m.modalInput.Focus()
+			}
+			return m, nil
+
+		case "x", "delete":
+			m.openDeleteModal()
+			return m, nil
+
+		case "m":
+			m.openMoveModal()
+			return m, nil
 
 		case "ctrl+k":
 			m.aiOpen = true
@@ -1048,9 +1113,25 @@ func (m Model) View() string {
 	// 5. Footer Bar
 	var footer string
 	if m.modalType != "" {
-		kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Confirm  ")
-		kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Cancel")
-		footer = " ✦ Modal Prompt │ " + kEnter + kClose
+		switch m.modalType {
+		case "rename":
+			kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Save Name  ")
+			kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Cancel")
+			footer = " ✦ Rename Item │ " + kEnter + kClose
+		case "delete":
+			kEnter := ui.FooterKeyStyle.Render("[Enter/Y]") + ui.FooterDescStyle.Render(" Confirm Delete  ")
+			kClose := ui.FooterKeyStyle.Render("[Esc/N]") + ui.FooterDescStyle.Render(" Cancel")
+			footer = " ⚠ Delete Item │ " + kEnter + kClose
+		case "move":
+			kNav := ui.FooterKeyStyle.Render("[W/S/↑/↓]") + ui.FooterDescStyle.Render(" Select  ")
+			kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Move Here  ")
+			kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Cancel")
+			footer = " ✦ Move Item │ " + kNav + kEnter + kClose
+		default:
+			kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Confirm  ")
+			kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Cancel")
+			footer = " ✦ Modal Prompt │ " + kEnter + kClose
+		}
 	} else if m.inEditMode {
 		kSave := ui.FooterKeyStyle.Render("[Ctrl+S]") + ui.FooterDescStyle.Render(" Save  ")
 		kDone := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Save & Finish  ")
@@ -1093,13 +1174,16 @@ func (m Model) View() string {
 			kNav := ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  ")
 			kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  ")
 			kEdit := ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  ")
-			kNew := ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New Note  ")
+			kNew := ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New  ")
 			kFolder := ui.FooterKeyStyle.Render("[F]") + ui.FooterDescStyle.Render(" Folder  ")
+			kRename := ui.FooterKeyStyle.Render("[R]") + ui.FooterDescStyle.Render(" Rename  ")
+			kMove := ui.FooterKeyStyle.Render("[M]") + ui.FooterDescStyle.Render(" Move  ")
+			kDelete := ui.FooterKeyStyle.Render("[X]") + ui.FooterDescStyle.Render(" Del  ")
 			kLog := ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  ")
-			kCheat := ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide  ")
+			kCheat := ui.FooterKeyStyle.Render("[F1]") + ui.FooterDescStyle.Render(" Guide  ")
 			kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
 			kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
-			footer = " " + kNav + kExp + kEdit + kNew + kFolder + kLog + kCheat + kAi + kQuit
+			footer = " " + kNav + kExp + kEdit + kNew + kFolder + kRename + kMove + kDelete + kLog + kCheat + kAi + kQuit
 		}
 	}
 	if lipgloss.Width(footer) > usableWidth {
@@ -1257,13 +1341,15 @@ func (m Model) View() string {
 		}
 	}
 
-	// 8. Layered Floating Modal Overlay (New Note, New Folder, Quick Log)
+	// 8. Layered Floating Modal Overlay (New Note, New Folder, Quick Log, Rename, Delete, Move)
 	if m.modalType != "" {
-		modalWidth := min(58, usableWidth-4)
-		innerModalWidth := max(10, modalWidth-10)
+		modalWidth := min(62, usableWidth-4)
+		innerModalWidth := max(10, modalWidth-8)
 		var title string
 		var subLabel string
 		var actionHint string
+		var bodyView string
+		borderColor := ui.ColorFlameOrange
 
 		homeDir, _ := os.UserHomeDir()
 		friendlyDest := m.modalDestPath
@@ -1271,45 +1357,130 @@ func (m Model) View() string {
 			friendlyDest = "~" + strings.TrimPrefix(friendlyDest, homeDir)
 		}
 
+		m.modalInput.Width = max(20, innerModalWidth-4)
+
 		switch m.modalType {
 		case "new_note":
 			title = ui.Gradient("✦  C R E A T E   N E W   N O T E", "#FF4500", "#FFD166")
 			subLabel = fmt.Sprintf("󰉋 Saving in: %s", friendlyDest)
 			actionHint = "[Enter] Create & Open Editor  •  [Esc] Cancel"
+			bodyView = m.modalInput.View()
+
 		case "new_folder":
 			title = ui.Gradient("✦  C R E A T E   N E W   F O L D E R", "#FF4500", "#FFD166")
 			subLabel = fmt.Sprintf("󰉋 Location: %s", friendlyDest)
 			actionHint = "[Enter] Create Folder  •  [Esc] Cancel"
+			bodyView = m.modalInput.View()
+
 		case "quick_log":
 			title = ui.Gradient("✦  Q U I C K   D A I L Y   L O G", "#FF4500", "#FFD166")
 			today := time.Now().Format("2006-01-02")
 			subLabel = fmt.Sprintf("󰈙 Appending to: %s-quick-log.md", today)
 			actionHint = "[Enter] Save Log Entry  •  [Esc] Cancel"
-		}
+			bodyView = m.modalInput.View()
 
-		m.modalInput.Width = max(20, innerModalWidth-4)
-		inputBox := m.modalInput.View()
+		case "rename":
+			itemType := "N O T E"
+			if m.modalTargetItem != nil && m.modalTargetItem.IsFolder {
+				itemType = "F O L D E R"
+			}
+			title = ui.Gradient(fmt.Sprintf("✦  R E N A M E   %s", itemType), "#FF4500", "#FFD166")
+			currName := ""
+			if m.modalTargetItem != nil {
+				currName = m.modalTargetItem.Title
+			}
+			subLabel = fmt.Sprintf("Current name: %s", currName)
+			actionHint = "[Enter] Save Name  •  [Esc] Cancel"
+			bodyView = m.modalInput.View()
+
+		case "delete":
+			borderColor = ui.ColorRed
+			itemType := "N O T E"
+			if m.modalTargetItem != nil && m.modalTargetItem.IsFolder {
+				itemType = "F O L D E R"
+			}
+			title = ui.Gradient(fmt.Sprintf("⚠  D E L E T E   %s", itemType), "#FF3333", "#F38BA8")
+			currName := ""
+			warnDetails := ""
+			if m.modalTargetItem != nil {
+				currName = m.modalTargetItem.Title
+				if m.modalTargetItem.IsFolder {
+					warnDetails = fmt.Sprintf("Folder contains %d note(s) inside.\nAll contents will be permanently deleted.", m.modalTargetItem.NoteCount)
+				}
+			}
+			subLabel = "Are you sure you want to delete:"
+			actionHint = "[Enter / Y] Confirm Delete  •  [Esc / N] Cancel"
+			nameCard := lipgloss.NewStyle().
+				Bold(true).
+				Foreground(ui.ColorFlameOrange).
+				Background(ui.ColorSelectBg).
+				Padding(0, 1).
+				Render(" " + currName + " ")
+			if warnDetails != "" {
+				bodyView = fmt.Sprintf("%s\n\n%s", nameCard, ui.SubtitleStyle.Render(warnDetails))
+			} else {
+				bodyView = nameCard
+			}
+
+		case "move":
+			title = ui.Gradient("✦  M O V E   I T E M", "#FF4500", "#FFD166")
+			currName := ""
+			if m.modalTargetItem != nil {
+				currName = m.modalTargetItem.Title
+			}
+			subLabel = fmt.Sprintf("Moving: %s", currName)
+			actionHint = "[W/S/↑/↓] Select Destination  •  [Enter] Move Here  •  [Esc] Cancel"
+
+			maxRows := 5
+			startIdx := 0
+			if m.moveSelected >= maxRows {
+				startIdx = m.moveSelected - maxRows + 1
+			}
+			endIdx := min(len(m.moveFolders), startIdx+maxRows)
+
+			var folderLines []string
+			for idx := startIdx; idx < endIdx; idx++ {
+				fPath := m.moveFolders[idx]
+				displayName := fPath
+				if displayName == m.workspacePath {
+					displayName = "~/Notes (Root)"
+				} else if strings.HasPrefix(displayName, homeDir) {
+					displayName = "~" + strings.TrimPrefix(displayName, homeDir)
+				}
+				if len(displayName) > innerModalWidth-6 {
+					displayName = truncateWithDots(displayName, innerModalWidth-6)
+				}
+
+				if idx == m.moveSelected {
+					cursor := ui.TreeCursor.Render("❯ ")
+					pill := ui.ActiveBadgeStyle.Render("📁 " + displayName)
+					folderLines = append(folderLines, cursor+pill)
+				} else {
+					folderLines = append(folderLines, "  "+ui.TreeNormalFolder.Render("📁 "+displayName))
+				}
+			}
+			bodyView = strings.Join(folderLines, "\n")
+		}
 
 		subStyle := ui.SubtitleStyle.Render(subLabel)
 		hintStyle := ui.SubtitleStyle.Render(actionHint)
-
 		rule := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", innerModalWidth))
 
-		modalContent := lipgloss.JoinVertical(
-			lipgloss.Left,
-			title,
-			subStyle,
-			rule,
-			"",
-			inputBox,
-			"",
-			rule,
-			hintStyle,
-		)
+		var modalContentLines []string
+		modalContentLines = append(modalContentLines, title, subStyle, rule, "")
+		modalContentLines = append(modalContentLines, bodyView, "")
+		if m.modalError != "" {
+			errText := lipgloss.NewStyle().Foreground(ui.ColorRed).Bold(true).Render("⚠ " + m.modalError)
+			modalContentLines = append(modalContentLines, errText, "")
+		}
+		modalContentLines = append(modalContentLines, rule, hintStyle)
+
+		modalContent := lipgloss.JoinVertical(lipgloss.Left, modalContentLines...)
 
 		modalBoxStyle := lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
-			BorderForeground(ui.ColorFlameOrange).
+			BorderForeground(borderColor).
+			Background(ui.ColorDarkSlate).
 			Padding(1, 2)
 
 		modalRendered := modalBoxStyle.Width(modalWidth - 6).Render(modalContent)
@@ -1376,19 +1547,225 @@ func slugify(s string) string {
 	return strings.Trim(res, "-_")
 }
 
-func (m Model) getDestinationDir() string {
+func (m Model) getSelectedNode() *notes.Node {
 	if m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
 		actualID := m.visibleIndices[m.selectedIdx]
 		for idx := range m.allNodes {
 			if m.allNodes[idx].ID == actualID {
-				if m.allNodes[idx].IsFolder {
-					return m.allNodes[idx].Path
-				}
-				return filepath.Dir(m.allNodes[idx].Path)
+				return &m.allNodes[idx]
 			}
 		}
 	}
+	return nil
+}
+
+func (m Model) getDestinationDir() string {
+	if node := m.getSelectedNode(); node != nil {
+		if node.IsFolder {
+			return node.Path
+		}
+		return filepath.Dir(node.Path)
+	}
 	return m.workspacePath
+}
+
+func (m *Model) openRenameModal() {
+	item := m.getSelectedNode()
+	if item == nil || item.Path == m.workspacePath {
+		return
+	}
+	m.modalType = "rename"
+	m.modalTargetItem = item
+	m.modalError = ""
+	m.modalInput.Reset()
+	if item.IsFolder {
+		m.modalInput.SetValue(item.Title)
+		m.modalInput.Placeholder = "New folder name"
+	} else {
+		ext := filepath.Ext(item.FileName)
+		baseName := strings.TrimSuffix(item.FileName, ext)
+		m.modalInput.SetValue(baseName)
+		m.modalInput.Placeholder = "New note title"
+	}
+	m.modalInput.Focus()
+}
+
+func (m *Model) confirmRename() {
+	if m.modalTargetItem == nil {
+		m.modalType = ""
+		m.modalInput.Blur()
+		return
+	}
+	newName := strings.TrimSpace(m.modalInput.Value())
+	if newName == "" {
+		m.modalType = ""
+		m.modalTargetItem = nil
+		m.modalInput.Blur()
+		return
+	}
+
+	if strings.ContainsAny(newName, `\/:*?"<>|`) {
+		m.modalError = `Name cannot contain \ / : * ? " < > |`
+		return
+	}
+
+	oldPath := m.modalTargetItem.Path
+	dir := filepath.Dir(oldPath)
+	var newPath string
+	if m.modalTargetItem.IsFolder {
+		newPath = filepath.Join(dir, newName)
+	} else {
+		if !strings.HasSuffix(strings.ToLower(newName), ".md") {
+			newName += ".md"
+		}
+		newPath = filepath.Join(dir, newName)
+	}
+
+	if filepath.Clean(newPath) == filepath.Clean(oldPath) {
+		m.modalType = ""
+		m.modalTargetItem = nil
+		m.modalInput.Blur()
+		return
+	}
+
+	if _, err := os.Stat(newPath); err == nil {
+		m.modalError = "An item with that name already exists in this location."
+		return
+	}
+
+	if err := os.Rename(oldPath, newPath); err != nil {
+		m.modalError = fmt.Sprintf("Error renaming: %v", err)
+		return
+	}
+
+	m.modalType = ""
+	m.modalTargetItem = nil
+	m.modalError = ""
+	m.modalInput.Blur()
+
+	m.rescanTreePreservingExpansion(newPath)
+
+	for vIdx, id := range m.visibleIndices {
+		for idx := range m.allNodes {
+			if m.allNodes[idx].ID == id && m.allNodes[idx].Path == newPath {
+				m.selectedIdx = vIdx
+				break
+			}
+		}
+	}
+	m.updateViewportPreview()
+}
+
+func (m *Model) openDeleteModal() {
+	item := m.getSelectedNode()
+	if item == nil || item.Path == m.workspacePath {
+		return
+	}
+	m.modalType = "delete"
+	m.modalTargetItem = item
+	m.modalError = ""
+}
+
+func (m *Model) confirmDelete() {
+	if m.modalTargetItem == nil {
+		m.modalType = ""
+		return
+	}
+	targetPath := m.modalTargetItem.Path
+	if err := os.RemoveAll(targetPath); err != nil {
+		m.modalError = fmt.Sprintf("Error deleting: %v", err)
+		return
+	}
+
+	m.modalType = ""
+	m.modalTargetItem = nil
+	m.modalError = ""
+
+	m.rescanTreePreservingExpansion("")
+
+	if m.selectedIdx >= len(m.visibleIndices) {
+		m.selectedIdx = max(0, len(m.visibleIndices)-1)
+	}
+	m.updateViewportPreview()
+}
+
+func (m *Model) openMoveModal() {
+	item := m.getSelectedNode()
+	if item == nil || item.Path == m.workspacePath {
+		return
+	}
+	m.modalType = "move"
+	m.modalTargetItem = item
+	m.modalError = ""
+	m.moveSelected = 0
+
+	destFolders := []string{m.workspacePath}
+	cleanItemPath := filepath.Clean(item.Path)
+	for _, n := range m.allNodes {
+		if n.IsFolder {
+			cleanNodePath := filepath.Clean(n.Path)
+			if cleanNodePath == cleanItemPath {
+				continue
+			}
+			if item.IsFolder && strings.HasPrefix(cleanNodePath, cleanItemPath+string(filepath.Separator)) {
+				continue
+			}
+			destFolders = append(destFolders, n.Path)
+		}
+	}
+	m.moveFolders = destFolders
+
+	currentParent := filepath.Clean(filepath.Dir(item.Path))
+	for idx, f := range m.moveFolders {
+		if filepath.Clean(f) == currentParent {
+			m.moveSelected = idx
+			break
+		}
+	}
+}
+
+func (m *Model) confirmMove() {
+	if m.modalTargetItem == nil || len(m.moveFolders) == 0 || m.moveSelected < 0 || m.moveSelected >= len(m.moveFolders) {
+		m.modalType = ""
+		return
+	}
+
+	destDir := m.moveFolders[m.moveSelected]
+	oldPath := m.modalTargetItem.Path
+	currentParent := filepath.Dir(oldPath)
+
+	if filepath.Clean(destDir) == filepath.Clean(currentParent) {
+		m.modalType = ""
+		m.modalTargetItem = nil
+		return
+	}
+
+	newPath := filepath.Join(destDir, filepath.Base(oldPath))
+	if _, err := os.Stat(newPath); err == nil {
+		m.modalError = "An item with this name already exists in destination!"
+		return
+	}
+
+	if err := os.Rename(oldPath, newPath); err != nil {
+		m.modalError = fmt.Sprintf("Error moving: %v", err)
+		return
+	}
+
+	m.modalType = ""
+	m.modalTargetItem = nil
+	m.modalError = ""
+
+	m.rescanTreePreservingExpansion(newPath)
+
+	for vIdx, id := range m.visibleIndices {
+		for idx := range m.allNodes {
+			if m.allNodes[idx].ID == id && m.allNodes[idx].Path == newPath {
+				m.selectedIdx = vIdx
+				break
+			}
+		}
+	}
+	m.updateViewportPreview()
 }
 
 func (m *Model) openNewNoteModal() {
