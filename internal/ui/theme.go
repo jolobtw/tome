@@ -25,6 +25,7 @@ var (
 	ColorCyan         = lipgloss.Color("#89DCEB")
 	ColorGreen        = lipgloss.Color("#A6E3A1")
 	ColorRed          = lipgloss.Color("#F38BA8")
+	ColorCrimson      = lipgloss.Color("#FF4D4D")
 	ColorPurple       = lipgloss.Color("#CBA6F7")
 )
 
@@ -133,6 +134,32 @@ func Gradient(text string, fromHex, toHex string) string {
 		curB := uint8(math.Round(float64(b1) + ratio*(float64(b2)-float64(b1))))
 		hexColor := fmt.Sprintf("#%02X%02X%02X", curR, curG, curB)
 		result += lipgloss.NewStyle().Foreground(lipgloss.Color(hexColor)).Render(string(r))
+	}
+	return result
+}
+
+// GradientWithBg creates a gradient with an explicit solid background color on every rune
+func GradientWithBg(text string, fromHex, toHex string, bg lipgloss.Color) string {
+	runes := []rune(text)
+	n := len(runes)
+	if n == 0 {
+		return ""
+	}
+	if n == 1 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(fromHex)).Background(bg).Render(text)
+	}
+
+	r1, g1, b1 := HexToRGB(fromHex)
+	r2, g2, b2 := HexToRGB(toHex)
+
+	var result string
+	for i, r := range runes {
+		ratio := float64(i) / float64(n-1)
+		curR := uint8(math.Round(float64(r1) + ratio*(float64(r2)-float64(r1))))
+		curG := uint8(math.Round(float64(g1) + ratio*(float64(g2)-float64(g1))))
+		curB := uint8(math.Round(float64(b1) + ratio*(float64(b2)-float64(b1))))
+		hexColor := fmt.Sprintf("#%02X%02X%02X", curR, curG, curB)
+		result += lipgloss.NewStyle().Foreground(lipgloss.Color(hexColor)).Background(bg).Render(string(r))
 	}
 	return result
 }
