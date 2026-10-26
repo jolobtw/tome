@@ -1343,22 +1343,44 @@ func (m Model) View() string {
 
 	// 8. Layered Floating Modal Overlay (New Note, New Folder, Quick Log, Rename, Delete, Move)
 	if m.modalType != "" {
-		modalWidth := min(62, usableWidth-4)
-		innerModalWidth := max(10, modalWidth-8)
+		modalWidth := min(54, usableWidth-4)
+		innerModalWidth := max(10, modalWidth-6)
 		modalBg := ui.ColorDarkSlate
 		borderColor := ui.ColorFlameOrange
 
 		homeDir, _ := os.UserHomeDir()
-		friendlyDest := m.modalDestPath
-		if strings.HasPrefix(friendlyDest, homeDir) {
-			friendlyDest = "~" + strings.TrimPrefix(friendlyDest, homeDir)
-		}
+		m.modalInput.Width = max(20, innerModalWidth-2)
 
-		m.modalInput.Width = max(20, innerModalWidth-4)
+		var title string
+		var bodyView string
+		var actionHint string
 
-		var modalContentLines []string
+		switch m.modalType {
+		case "new_note":
+			title = ui.GradientWithBg("✦  CREATE NOTE", "#FF4500", "#FFD166", modalBg)
+			bodyView = m.modalInput.View()
+			actionHint = "[Enter] Create  •  [Esc] Cancel"
 
-		if m.modalType == "delete" {
+		case "new_folder":
+			title = ui.GradientWithBg("✦  CREATE FOLDER", "#FF4500", "#FFD166", modalBg)
+			bodyView = m.modalInput.View()
+			actionHint = "[Enter] Create  •  [Esc] Cancel"
+
+		case "quick_log":
+			title = ui.GradientWithBg("✦  QUICK LOG", "#FF4500", "#FFD166", modalBg)
+			bodyView = m.modalInput.View()
+			actionHint = "[Enter] Save  •  [Esc] Cancel"
+
+		case "rename":
+			itemType := "NOTE"
+			if m.modalTargetItem != nil && m.modalTargetItem.IsFolder {
+				itemType = "FOLDER"
+			}
+			title = ui.GradientWithBg(fmt.Sprintf("✦  RENAME %s", itemType), "#FF4500", "#FFD166", modalBg)
+			bodyView = m.modalInput.View()
+			actionHint = "[Enter] Rename  •  [Esc] Cancel"
+
+		case "delete":
 			borderColor = ui.ColorCrimson
 			itemType := "NOTE"
 			icon := "󰈙 "
@@ -1367,160 +1389,69 @@ func (m Model) View() string {
 				icon = "📁 "
 			}
 			currName := ""
-			warnDetails := ""
 			if m.modalTargetItem != nil {
 				currName = m.modalTargetItem.Title
-				if m.modalTargetItem.IsFolder {
-					warnDetails = fmt.Sprintf("Contains %d note(s) inside. All will be lost.", m.modalTargetItem.NoteCount)
-				}
 			}
-
-			title := lipgloss.NewStyle().
+			title = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(ui.ColorCrimson).
 				Background(modalBg).
 				Render(fmt.Sprintf("⚠  DELETE %s", itemType))
-
-			subLabel := lipgloss.NewStyle().
-				Foreground(ui.ColorTextRegular).
-				Background(modalBg).
-				Render("Are you sure you want to permanently delete:")
-
-			itemPill := lipgloss.NewStyle().
+			bodyView = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(ui.ColorTextBright).
 				Background(ui.ColorSelectBg).
 				Padding(0, 1).
 				Render(icon + currName)
+			actionHint = "[Enter / Y] Delete  •  [Esc / N] Cancel"
 
-			btnDelete := lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Background(ui.ColorCrimson).
-				Padding(0, 2).
-				Render("[ Enter / Y ] Delete")
+		case "move":
+			title = ui.GradientWithBg("✦  MOVE ITEM", "#FF4500", "#FFD166", modalBg)
+			actionHint = "[W/S/↑/↓] Select  •  [Enter] Move  •  [Esc] Cancel"
 
-			btnCancel := lipgloss.NewStyle().
-				Foreground(ui.ColorTextRegular).
-				Background(ui.ColorSelectBg).
-				Padding(0, 2).
-				Render("[ Esc / N ] Cancel")
-
-			buttons := fmt.Sprintf("%s    %s", btnDelete, btnCancel)
-			rule := lipgloss.NewStyle().
-				Foreground(ui.ColorBorderMuted).
-				Background(modalBg).
-				Render(strings.Repeat("─", innerModalWidth))
-
-			modalContentLines = append(modalContentLines, title)
-			modalContentLines = append(modalContentLines, subLabel)
-			modalContentLines = append(modalContentLines, "")
-			modalContentLines = append(modalContentLines, itemPill)
-			if warnDetails != "" {
-				modalContentLines = append(modalContentLines, lipgloss.NewStyle().Foreground(ui.ColorAmberGold).Background(modalBg).Render("⚠ "+warnDetails))
-			} else {
-				modalContentLines = append(modalContentLines, lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Background(modalBg).Render("This action cannot be undone."))
+			maxRows := 5
+			startIdx := 0
+			if m.moveSelected >= maxRows {
+				startIdx = m.moveSelected - maxRows + 1
 			}
-			modalContentLines = append(modalContentLines, "")
-			if m.modalError != "" {
-				errText := lipgloss.NewStyle().Foreground(ui.ColorCrimson).Background(modalBg).Bold(true).Render("⚠ " + m.modalError)
-				modalContentLines = append(modalContentLines, errText, "")
+			endIdx := min(len(m.moveFolders), startIdx+maxRows)
+
+			var folderLines []string
+			for idx := startIdx; idx < endIdx; idx++ {
+				fPath := m.moveFolders[idx]
+				displayName := fPath
+				if displayName == m.workspacePath {
+					displayName = "~/Notes (Root)"
+				} else if strings.HasPrefix(displayName, homeDir) {
+					displayName = "~" + strings.TrimPrefix(displayName, homeDir)
+				}
+				if len(displayName) > innerModalWidth-6 {
+					displayName = truncateWithDots(displayName, innerModalWidth-6)
+				}
+
+				if idx == m.moveSelected {
+					cursor := ui.TreeCursor.Background(modalBg).Render("❯ ")
+					pill := ui.ActiveBadgeStyle.Render("📁 " + displayName)
+					folderLines = append(folderLines, cursor+pill)
+				} else {
+					folderLines = append(folderLines, "  "+ui.TreeNormalFolder.Background(modalBg).Render("📁 "+displayName))
+				}
 			}
-			modalContentLines = append(modalContentLines, rule)
-			modalContentLines = append(modalContentLines, buttons)
-
-		} else {
-			var title string
-			var subLabel string
-			var actionHint string
-			var bodyView string
-
-			switch m.modalType {
-			case "new_note":
-				title = ui.GradientWithBg("✦  CREATE NEW NOTE", "#FF4500", "#FFD166", modalBg)
-				subLabel = fmt.Sprintf("󰉋 Saving in: %s", friendlyDest)
-				actionHint = "[Enter] Create & Open Editor  •  [Esc] Cancel"
-				bodyView = m.modalInput.View()
-
-			case "new_folder":
-				title = ui.GradientWithBg("✦  CREATE NEW FOLDER", "#FF4500", "#FFD166", modalBg)
-				subLabel = fmt.Sprintf("󰉋 Location: %s", friendlyDest)
-				actionHint = "[Enter] Create Folder  •  [Esc] Cancel"
-				bodyView = m.modalInput.View()
-
-			case "quick_log":
-				title = ui.GradientWithBg("✦  QUICK DAILY LOG", "#FF4500", "#FFD166", modalBg)
-				today := time.Now().Format("2006-01-02")
-				subLabel = fmt.Sprintf("󰈙 Appending to: %s-quick-log.md", today)
-				actionHint = "[Enter] Save Log Entry  •  [Esc] Cancel"
-				bodyView = m.modalInput.View()
-
-			case "rename":
-				itemType := "NOTE"
-				if m.modalTargetItem != nil && m.modalTargetItem.IsFolder {
-					itemType = "FOLDER"
-				}
-				title = ui.GradientWithBg(fmt.Sprintf("✦  RENAME %s", itemType), "#FF4500", "#FFD166", modalBg)
-				currName := ""
-				if m.modalTargetItem != nil {
-					currName = m.modalTargetItem.Title
-				}
-				subLabel = fmt.Sprintf("Current name: %s", currName)
-				actionHint = "[Enter] Save Name  •  [Esc] Cancel"
-				bodyView = m.modalInput.View()
-
-			case "move":
-				title = ui.GradientWithBg("✦  MOVE ITEM", "#FF4500", "#FFD166", modalBg)
-				currName := ""
-				if m.modalTargetItem != nil {
-					currName = m.modalTargetItem.Title
-				}
-				subLabel = fmt.Sprintf("Moving: %s", currName)
-				actionHint = "[W/S/↑/↓] Select Destination  •  [Enter] Move Here  •  [Esc] Cancel"
-
-				maxRows := 5
-				startIdx := 0
-				if m.moveSelected >= maxRows {
-					startIdx = m.moveSelected - maxRows + 1
-				}
-				endIdx := min(len(m.moveFolders), startIdx+maxRows)
-
-				var folderLines []string
-				for idx := startIdx; idx < endIdx; idx++ {
-					fPath := m.moveFolders[idx]
-					displayName := fPath
-					if displayName == m.workspacePath {
-						displayName = "~/Notes (Root)"
-					} else if strings.HasPrefix(displayName, homeDir) {
-						displayName = "~" + strings.TrimPrefix(displayName, homeDir)
-					}
-					if len(displayName) > innerModalWidth-6 {
-						displayName = truncateWithDots(displayName, innerModalWidth-6)
-					}
-
-					if idx == m.moveSelected {
-						cursor := ui.TreeCursor.Background(modalBg).Render("❯ ")
-						pill := ui.ActiveBadgeStyle.Render("📁 " + displayName)
-						folderLines = append(folderLines, cursor+pill)
-					} else {
-						folderLines = append(folderLines, "  "+ui.TreeNormalFolder.Background(modalBg).Render("📁 "+displayName))
-					}
-				}
-				bodyView = strings.Join(folderLines, "\n")
-			}
-
-			subStyle := ui.SubtitleStyle.Background(modalBg).Render(subLabel)
-			hintStyle := ui.SubtitleStyle.Background(modalBg).Render(actionHint)
-			rule := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Background(modalBg).Render(strings.Repeat("─", innerModalWidth))
-
-			modalContentLines = append(modalContentLines, title, subStyle, rule, "")
-			modalContentLines = append(modalContentLines, bodyView, "")
-			if m.modalError != "" {
-				errText := lipgloss.NewStyle().Foreground(ui.ColorCrimson).Background(modalBg).Bold(true).Render("⚠ " + m.modalError)
-				modalContentLines = append(modalContentLines, errText, "")
-			}
-			modalContentLines = append(modalContentLines, rule, hintStyle)
+			bodyView = strings.Join(folderLines, "\n")
 		}
+
+		hintStyle := ui.SubtitleStyle.Background(modalBg).Render(actionHint)
+
+		var modalContentLines []string
+		modalContentLines = append(modalContentLines, title)
+		modalContentLines = append(modalContentLines, "")
+		modalContentLines = append(modalContentLines, bodyView)
+		if m.modalError != "" {
+			errText := lipgloss.NewStyle().Foreground(ui.ColorCrimson).Background(modalBg).Bold(true).Render("⚠ " + m.modalError)
+			modalContentLines = append(modalContentLines, "", errText)
+		}
+		modalContentLines = append(modalContentLines, "")
+		modalContentLines = append(modalContentLines, hintStyle)
 
 		var paddedLines []string
 		for _, l := range modalContentLines {
