@@ -19,6 +19,15 @@ import (
 	"tome/internal/ui"
 )
 
+type SearchResult struct {
+	NodeID   int
+	Path     string
+	Title    string
+	RelPath  string
+	LineNum  int
+	Snippet  string
+}
+
 type Model struct {
 	width          int
 	height         int
@@ -40,14 +49,22 @@ type Model struct {
 	saveStatus     string
 	lastClickTime  time.Time
 
-	// Floating Modal System (New Note, New Folder, Quick Log, Rename, Delete, Move)
-	modalType       string // "", "new_note", "new_folder", "quick_log", "rename", "delete", "move"
+	// Quick Filter (Option 1 - [/])
+	filterActive bool
+	filterInput  textinput.Model
+
+	// Floating Modal System (New Note, New Folder, Quick Log, Rename, Delete, Move, Search)
+	modalType       string // "", "new_note", "new_folder", "quick_log", "rename", "delete", "move", "search"
 	modalInput      textinput.Model
 	modalDestPath   string
 	modalTargetItem *notes.Node
 	modalError      string
 	moveFolders     []string
 	moveSelected    int
+
+	// Content Search (Option 2 - [Ctrl+F])
+	searchResults  []SearchResult
+	searchSelected int
 
 	// Interactive AI Knowledge Assistant
 	aiOpen       bool
@@ -170,6 +187,13 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 	mi.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
 	mi.CharLimit = 80
 
+	fi := textinput.New()
+	fi.Prompt = ""
+	fi.Placeholder = "Type to filter notes... (Esc to clear)"
+	fi.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright)
+	fi.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
+	fi.CharLimit = 50
+
 	m := Model{
 		config:        cfg,
 		workspacePath: workspacePath,
@@ -179,10 +203,11 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 		selectedIdx:   0,
 		activePane:    0,
 		editor:        ta,
+		filterInput:   fi,
 		aiInput:       ti,
 		aiState:       "idle",
 		modalInput:    mi,
-		statusMsg:     "Welcome to Tome • Press [Ctrl+K] for Cloud AI Assistant",
+		statusMsg:     "Welcome to Tome • Press [/] to Filter • [Ctrl+F] Search • [Ctrl+K] AI",
 	}
 
 	// Auto-select first note if available
@@ -201,6 +226,26 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 
 // rebuildVisible computes the flat visible list of nodes with continuous tree guide lines
 func (m *Model) rebuildVisible() {
+	if m.filterActive && strings.TrimSpace(m.filterInput.Value()) != "" {
+		q := strings.ToLower(strings.TrimSpace(m.filterInput.Value()))
+		var visible []int
+		for idx := range m.allNodes {
+			if !m.allNodes[idx].IsFolder {
+				titleLower := strings.ToLower(m.allNodes[idx].Title)
+				relLower := strings.ToLower(m.allNodes[idx].RelPath)
+				if strings.Contains(titleLower, q) || strings.Contains(relLower, q) {
+					m.allNodes[idx].Prefix = ""
+					visible = append(visible, m.allNodes[idx].ID)
+				}
+			}
+		}
+		m.visibleIndices = visible
+		if m.selectedIdx >= len(m.visibleIndices) {
+			m.selectedIdx = max(0, len(m.visibleIndices)-1)
+		}
+		return
+	}
+
 	var visible []int
 
 	var addLevel func(parentID int, level int, ancestorsHasNext []bool)
@@ -359,10 +404,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.modalType = ""
 				m.modalError = ""
 				m.modalTargetItem = nil
+				m.searchResults = nil
+				m.searchSelected = 0
 				m.modalInput.Blur()
 				return m, nil
 
-			case "up", "k", "w":
+			case "up":
+				if m.modalType == "move" {
+					if m.moveSelected > 0 {
+						m.moveSelected--
+					}
+					return m, nil
+				}
+				if m.modalType == "search" {
+					if m.searchSelected > 0 {
+						m.searchSelected--
+					}
+					return m, nil
+				}
+
+			case "down":
+				if m.modalType == "move" {
+					if m.moveSelected < len(m.moveFolders)-1 {
+						m.moveSelected++
+					}
+					return m, nil
+				}
+				if m.modalType == "search" {
+					if m.searchSelected < len(m.searchResults)-1 {
+						m.searchSelected++
+					}
+					return m, nil
+				}
+
+			case "k", "w":
 				if m.modalType == "move" {
 					if m.moveSelected > 0 {
 						m.moveSelected--
@@ -370,7 +445,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
-			case "down", "j", "s":
+			case "j", "s":
 				if m.modalType == "move" {
 					if m.moveSelected < len(m.moveFolders)-1 {
 						m.moveSelected++
@@ -412,6 +487,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "move":
 					m.confirmMove()
 					return m, nil
+				case "search":
+					if len(m.searchResults) > 0 && m.searchSelected >= 0 && m.searchSelected < len(m.searchResults) {
+						res := m.searchResults[m.searchSelected]
+						targetPath := res.Path
+						targetLine := res.LineNum
+						m.modalType = ""
+						m.modalInput.Blur()
+						m.searchResults = nil
+
+						m.rescanTreePreservingExpansion(targetPath)
+						cleanTarget := filepath.Clean(targetPath)
+						for vIdx, id := range m.visibleIndices {
+							for idx := range m.allNodes {
+								if m.allNodes[idx].ID == id && filepath.Clean(m.allNodes[idx].Path) == cleanTarget {
+									m.selectedIdx = vIdx
+									break
+								}
+							}
+						}
+						m.activePane = 1
+						if m.viewport.Width > 0 {
+							m.viewport.SetContent(m.renderActivePreview(m.viewport.Width))
+							m.viewport.SetYOffset(max(0, targetLine-3))
+						}
+						return m, nil
+					}
+					return m, nil
 				}
 				m.modalType = ""
 				m.modalInput.Blur()
@@ -425,6 +527,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			var tiCmd tea.Cmd
 			m.modalInput, tiCmd = m.modalInput.Update(msg)
+			if m.modalType == "search" {
+				m.performContentSearch(m.modalInput.Value())
+			}
 			return m, tiCmd
 		}
 
@@ -529,6 +634,86 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.aiInput, tiCmd = m.aiInput.Update(msg)
 			cmds = append(cmds, tiCmd)
 			return m, tea.Batch(cmds...)
+		}
+
+		// Quick Note Filter Mode ([/])
+		if m.filterActive {
+			switch msg.String() {
+			case "esc":
+				m.filterActive = false
+				m.filterInput.Reset()
+				m.filterInput.Blur()
+				m.rebuildVisible()
+				m.updateViewportPreview()
+				return m, nil
+
+			case "enter":
+				chosenID := -1
+				if m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
+					chosenID = m.visibleIndices[m.selectedIdx]
+				}
+				m.filterActive = false
+				m.filterInput.Reset()
+				m.filterInput.Blur()
+
+				if chosenID != -1 {
+					// Expand ancestors of chosen note so it stays visible in full tree
+					for pID := m.getNodeParentID(chosenID); pID != -1; {
+						found := false
+						for idx := range m.allNodes {
+							if m.allNodes[idx].ID == pID {
+								m.allNodes[idx].Expanded = true
+								pID = m.allNodes[idx].ParentID
+								found = true
+								break
+							}
+						}
+						if !found {
+							break
+						}
+					}
+				}
+
+				m.rebuildVisible()
+
+				if chosenID != -1 {
+					for vIdx, id := range m.visibleIndices {
+						if id == chosenID {
+							m.selectedIdx = vIdx
+							break
+						}
+					}
+				}
+				m.updateViewportPreview()
+				return m, nil
+
+			case "up":
+				if m.selectedIdx > 0 {
+					m.selectedIdx--
+					m.updateViewportPreview()
+				}
+				return m, nil
+
+			case "down":
+				if m.selectedIdx < len(m.visibleIndices)-1 {
+					m.selectedIdx++
+					m.updateViewportPreview()
+				}
+				return m, nil
+
+			case "tab":
+				m.filterActive = false
+				m.filterInput.Blur()
+				m.activePane = 1
+				m.updateViewportPreview()
+				return m, nil
+			}
+
+			var fiCmd tea.Cmd
+			m.filterInput, fiCmd = m.filterInput.Update(msg)
+			m.rebuildVisible()
+			m.updateViewportPreview()
+			return m, fiCmd
 		}
 
 		// Main navigation keys
@@ -699,6 +884,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openMoveModal()
 			return m, nil
 
+		case "/":
+			m.activePane = 0
+			m.filterActive = true
+			m.filterInput.Reset()
+			m.filterInput.Focus()
+			m.rebuildVisible()
+			return m, m.filterInput.Focus()
+
+		case "ctrl+f":
+			m.modalType = "search"
+			m.modalInput.Reset()
+			m.modalInput.Placeholder = "Search note contents (e.g. dragon)..."
+			m.searchResults = nil
+			m.searchSelected = 0
+			return m, m.modalInput.Focus()
+
 		case "ctrl+k":
 			m.aiOpen = true
 			m.sliding = true
@@ -796,7 +997,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.activePane = 0
-			clickedRow := msg.Y - 3
+			offset := 3
+			if m.filterActive {
+				offset = 5
+			}
+			clickedRow := msg.Y - offset
 			if clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
 				now := time.Now()
 				if now.Sub(m.lastClickTime) < 200*time.Millisecond {
@@ -1007,10 +1212,21 @@ func (m Model) View() string {
 	innerLeftWidth := leftTotalWidth - 4
 	var treeLines []string
 	availTitleWidth := max(4, innerLeftWidth-4)
-	maxVisibleRows := panesContentHeight
+
+	if m.filterActive {
+		m.filterInput.Width = max(10, innerLeftWidth-8)
+		filterPrompt := lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Bold(true).Render("🔍 ")
+		treeLines = append(treeLines, filterPrompt+m.filterInput.View())
+		filterDivider := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", innerLeftWidth))
+		treeLines = append(treeLines, filterDivider)
+	}
+
+	if m.filterActive && len(m.visibleIndices) == 0 {
+		treeLines = append(treeLines, ui.SubtitleStyle.Render("  No notes match filter"))
+	}
 
 	for i, visID := range m.visibleIndices {
-		if len(treeLines) >= maxVisibleRows {
+		if len(treeLines) >= panesContentHeight {
 			break
 		}
 
@@ -1034,7 +1250,19 @@ func (m Model) View() string {
 			}
 		}
 
-		rawTitle := truncateWithDots(item.Prefix+icon+item.Title, availTitleWidth)
+		var displayTitle string
+		if m.filterActive {
+			dir := filepath.Dir(item.RelPath)
+			if dir != "." && dir != "" {
+				displayTitle = fmt.Sprintf("%s%s (%s)", icon, item.Title, dir)
+			} else {
+				displayTitle = icon + item.Title
+			}
+		} else {
+			displayTitle = item.Prefix + icon + item.Title
+		}
+
+		rawTitle := truncateWithDots(displayTitle, availTitleWidth)
 		noBreakTitle := strings.ReplaceAll(rawTitle, " ", "\u00a0")
 		noBreakTitle = strings.ReplaceAll(noBreakTitle, "-", "\u2011")
 
@@ -1114,6 +1342,11 @@ func (m Model) View() string {
 	var footer string
 	if m.modalType != "" {
 		switch m.modalType {
+		case "search":
+			kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Select  ")
+			kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Jump to Note  ")
+			kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Cancel")
+			footer = " ✦ Content Search │ " + kNav + kEnter + kClose
 		case "rename":
 			kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Save Name  ")
 			kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Cancel")
@@ -1132,6 +1365,11 @@ func (m Model) View() string {
 			kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Cancel")
 			footer = " ✦ Modal Prompt │ " + kEnter + kClose
 		}
+	} else if m.filterActive {
+		kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Select  ")
+		kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open Note  ")
+		kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Clear Filter")
+		footer = " 🔍 Quick Filter │ " + kNav + kEnter + kClose
 	} else if m.inEditMode {
 		kSave := ui.FooterKeyStyle.Render("[Ctrl+S]") + ui.FooterDescStyle.Render(" Save  ")
 		kDone := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Save & Finish  ")
@@ -1163,15 +1401,17 @@ func (m Model) View() string {
 	} else {
 		if m.activePane == 1 {
 			kNav := ui.FooterKeyStyle.Render("[W/S/Wheel]") + ui.FooterDescStyle.Render(" Scroll  ")
-			kJump := ui.FooterKeyStyle.Render("[Home/End]") + ui.FooterDescStyle.Render(" Top/Bottom  ")
+			kSearch := ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  ")
 			kTab := ui.FooterKeyStyle.Render("[Tab/A]") + ui.FooterDescStyle.Render(" Tree Pane  ")
 			kEdit := ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  ")
 			kCheat := ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide  ")
 			kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
 			kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
-			footer = " 📄 Preview │ " + kNav + kJump + kTab + kEdit + kCheat + kAi + kQuit
+			footer = " 📄 Preview │ " + kNav + kSearch + kTab + kEdit + kCheat + kAi + kQuit
 		} else {
 			kNav := ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  ")
+			kFilter := ui.FooterKeyStyle.Render("[/]") + ui.FooterDescStyle.Render(" Filter  ")
+			kSearch := ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  ")
 			kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  ")
 			kEdit := ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  ")
 			kNew := ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New  ")
@@ -1180,10 +1420,9 @@ func (m Model) View() string {
 			kMove := ui.FooterKeyStyle.Render("[M]") + ui.FooterDescStyle.Render(" Move  ")
 			kDelete := ui.FooterKeyStyle.Render("[X]") + ui.FooterDescStyle.Render(" Del  ")
 			kLog := ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  ")
-			kCheat := ui.FooterKeyStyle.Render("[F1]") + ui.FooterDescStyle.Render(" Guide  ")
 			kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
 			kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
-			footer = " " + kNav + kExp + kEdit + kNew + kFolder + kRename + kMove + kDelete + kLog + kCheat + kAi + kQuit
+			footer = " " + kNav + kFilter + kSearch + kExp + kEdit + kNew + kFolder + kRename + kMove + kDelete + kLog + kAi + kQuit
 		}
 	}
 	if lipgloss.Width(footer) > usableWidth {
@@ -1341,9 +1580,12 @@ func (m Model) View() string {
 		}
 	}
 
-	// 8. Layered Floating Modal Overlay (New Note, New Folder, Quick Log, Rename, Delete, Move)
+	// 8. Layered Floating Modal Overlay (New Note, New Folder, Quick Log, Rename, Delete, Move, Search)
 	if m.modalType != "" {
 		modalWidth := min(54, usableWidth-4)
+		if m.modalType == "search" {
+			modalWidth = min(76, usableWidth-4)
+		}
 		innerModalWidth := max(10, modalWidth-6)
 		modalBg := ui.ColorDarkSlate
 		borderColor := ui.ColorFlameOrange
@@ -1356,6 +1598,54 @@ func (m Model) View() string {
 		var actionHint string
 
 		switch m.modalType {
+		case "search":
+			title = ui.GradientWithBg("✦  CONTENT SEARCH", "#FF4500", "#FFD166", modalBg)
+			actionHint = "[↑/↓] Select  •  [Enter] Jump  •  [Esc] Cancel"
+
+			var resultLines []string
+			resultLines = append(resultLines, m.modalInput.View())
+			resultLines = append(resultLines, "")
+
+			if strings.TrimSpace(m.modalInput.Value()) == "" {
+				resultLines = append(resultLines, ui.SubtitleStyle.Background(modalBg).Render("  Type keywords to search across all notes..."))
+			} else if len(m.searchResults) == 0 {
+				resultLines = append(resultLines, ui.SubtitleStyle.Background(modalBg).Render("  No matching notes found."))
+			} else {
+				maxDisplay := 5
+				startIdx := 0
+				if m.searchSelected >= maxDisplay {
+					startIdx = m.searchSelected - maxDisplay + 1
+				}
+				endIdx := min(len(m.searchResults), startIdx+maxDisplay)
+
+				for idx := startIdx; idx < endIdx; idx++ {
+					res := m.searchResults[idx]
+					matchHeader := fmt.Sprintf("%s:%d", res.RelPath, res.LineNum)
+					availHeaderWidth := innerModalWidth - 4
+					if lipgloss.Width(matchHeader) > availHeaderWidth {
+						matchHeader = truncateWithDots(matchHeader, availHeaderWidth)
+					}
+
+					snippet := res.Snippet
+					availSnippetWidth := innerModalWidth - 6
+					if lipgloss.Width(snippet) > availSnippetWidth {
+						snippet = truncateWithDots(snippet, availSnippetWidth)
+					}
+
+					if idx == m.searchSelected {
+						cursor := ui.TreeCursor.Background(modalBg).Render("❯ ")
+						headerPill := ui.ActiveBadgeStyle.Render(matchHeader)
+						snipText := lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(modalBg).Render("   " + snippet)
+						resultLines = append(resultLines, cursor+headerPill, snipText)
+					} else {
+						headerText := lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Background(modalBg).Bold(true).Render("  " + matchHeader)
+						snipText := lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Background(modalBg).Render("   " + snippet)
+						resultLines = append(resultLines, headerText, snipText)
+					}
+				}
+			}
+			bodyView = strings.Join(resultLines, "\n")
+
 		case "new_note":
 			title = ui.GradientWithBg("✦  CREATE NOTE", "#FF4500", "#FFD166", modalBg)
 			bodyView = m.modalInput.View()
@@ -1453,8 +1743,15 @@ func (m Model) View() string {
 		modalContentLines = append(modalContentLines, "")
 		modalContentLines = append(modalContentLines, hintStyle)
 
+		var flatLines []string
+		for _, item := range modalContentLines {
+			for _, sub := range strings.Split(item, "\n") {
+				flatLines = append(flatLines, sub)
+			}
+		}
+
 		var paddedLines []string
-		for _, l := range modalContentLines {
+		for _, l := range flatLines {
 			paddedLines = append(paddedLines, padRightWithBg(l, innerModalWidth, modalBg))
 		}
 		modalContent := strings.Join(paddedLines, "\n")
@@ -1956,6 +2253,57 @@ func (m *Model) confirmQuickLog() {
 	m.modalType = ""
 	m.modalInput.Blur()
 	m.updateViewportPreview()
+}
+
+func (m *Model) getNodeParentID(id int) int {
+	for idx := range m.allNodes {
+		if m.allNodes[idx].ID == id {
+			return m.allNodes[idx].ParentID
+		}
+	}
+	return -1
+}
+
+func (m *Model) performContentSearch(query string) {
+	q := strings.TrimSpace(query)
+	m.searchResults = nil
+	m.searchSelected = 0
+	if q == "" {
+		return
+	}
+
+	qLower := strings.ToLower(q)
+	for _, node := range m.allNodes {
+		if node.IsFolder {
+			continue
+		}
+		data, err := os.ReadFile(node.Path)
+		if err != nil {
+			continue
+		}
+
+		lines := strings.Split(string(data), "\n")
+		for lineIdx, line := range lines {
+			lineTrimmed := strings.TrimRight(line, "\r")
+			if strings.Contains(strings.ToLower(lineTrimmed), qLower) {
+				snippet := strings.TrimSpace(lineTrimmed)
+				if snippet == "" {
+					snippet = "(empty line match)"
+				}
+				m.searchResults = append(m.searchResults, SearchResult{
+					NodeID:  node.ID,
+					Path:    node.Path,
+					Title:   node.Title,
+					RelPath: node.RelPath,
+					LineNum: lineIdx + 1,
+					Snippet: snippet,
+				})
+				if len(m.searchResults) >= 30 {
+					return
+				}
+			}
+		}
+	}
 }
 
 // scrollToBottom primes the editor's viewport buffer and scrolls to the end of the note

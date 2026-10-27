@@ -33,11 +33,21 @@ A high-velocity, aesthetic terminal notebook for browsing, writing, and organizi
 | `A` or `Left` | Collapse folder (or jump to parent folder) |
 | `D` or `Right` | Expand folder (or step into first child) |
 | `Enter` or `Space` | Toggle folder expand / collapse |
+| `/` | **Quick Filter:** Real-time tree filter by note title & folder path |
+| `Ctrl+F` | **Content Search:** Full-text keyword search across all notes |
+| `E` | **In-Place Editor:** Edit active note directly in Tome |
+| `N` | **New Note:** Create a markdown note in current folder |
+| `F` | **New Folder:** Create a new subfolder |
+| `R` | **Rename:** Rename selected note or folder |
+| `M` | **Move:** Move item to any directory in the workspace |
+| `X` | **Delete:** Safely remove selected note or folder |
+| `L` | **Quick Log:** Append timestamped bullet to today's daily log |
+| `F1` or `Ctrl+G` | Open Markdown formatting guide & cheat sheet |
+| `Tab` | Switch active focus between Tree and Preview |
 | `Mouse Hover + Scroll` | Context-aware scrolling (Tree vs Preview) |
 | `Left Click` | Select item or toggle folder |
-| `Tab` | Switch active focus between Tree and Preview |
 | `Ctrl+K` | Toggle Cloud AI Research Assistant |
-| `Esc` | Close AI Drawer |
+| `Esc` | Dismiss modals, search, or close AI Drawer |
 | `Q` or `Ctrl+C` | Quit Tome |
 
 ---
