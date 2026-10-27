@@ -2523,13 +2523,15 @@ func formatContextLine(c ContextLine, query string, isSelected bool, maxWidth in
 		s = " "
 	}
 
+	lineFg := lipgloss.Color("#8A8F9E")
+	baseStyle := lipgloss.NewStyle().Faint(true).Foreground(lineFg).Background(ui.ColorDarkSlate)
+
 	if !c.IsMatch {
 		// Context line: faint / muted, soft slate text with background
-		style := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("#8A8F9E")).Background(ui.ColorDarkSlate)
 		if maxWidth > 6 && lipgloss.Width(s) > maxWidth-6 {
 			s = truncateWithDots(s, maxWidth-6)
 		}
-		return indent + style.Render(s)
+		return indent + baseStyle.Render(s)
 	}
 
 	// Match line
@@ -2538,11 +2540,10 @@ func formatContextLine(c ContextLine, query string, isSelected bool, maxWidth in
 	sLower := strings.ToLower(s)
 	idx := strings.Index(sLower, qLower)
 	if idx == -1 || q == "" {
-		style := lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate)
 		if maxWidth > 6 && lipgloss.Width(s) > maxWidth-6 {
 			s = truncateWithDots(s, maxWidth-6)
 		}
-		return indent + style.Render(s)
+		return indent + baseStyle.Render(s)
 	}
 
 	// Crop long line around match
@@ -2558,17 +2559,10 @@ func formatContextLine(c ContextLine, query string, isSelected bool, maxWidth in
 		after = after + "…"
 	}
 
-	var baseStyle lipgloss.Style
-	if isSelected {
-		baseStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate)
-	} else {
-		baseStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#C0C5D0")).Background(ui.ColorDarkSlate)
-	}
-
+	// Match word highlight: same text color as the rest of the line, with subtle theme-appropriate amber glow background
 	matchStyle := lipgloss.NewStyle().
-		Background(ui.ColorFlameOrange).
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Bold(true)
+		Background(lipgloss.Color("#482A16")).
+		Foreground(lineFg)
 
 	rendered := indent + baseStyle.Render(before) + matchStyle.Render(match) + baseStyle.Render(after)
 	if maxWidth > 6 && lipgloss.Width(rendered) > maxWidth {
