@@ -972,7 +972,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		if m.modalType != "" || m.aiOpen || m.searchOpen {
+		if m.searchOpen && !m.searchSliding {
+			switch msg.Type {
+			case tea.MouseWheelUp:
+				if m.searchSelected > 0 {
+					m.searchSelected--
+				}
+				return m, nil
+			case tea.MouseWheelDown:
+				if m.searchSelected < len(m.searchResults)-1 {
+					m.searchSelected++
+				}
+				return m, nil
+			}
+			return m, nil
+		}
+
+		if m.modalType != "" || m.aiOpen {
 			return m, nil
 		}
 
@@ -1661,31 +1677,54 @@ func (m Model) View() string {
 		} else if len(m.searchResults) == 0 {
 			resultsLines = append(resultsLines, ui.SubtitleStyle.Render(fmt.Sprintf("\n  No notes found matching %q.", query)))
 		} else {
-			entryHeight := 5
-			maxDisplay := max(1, (drawerContentHeight-4)/entryHeight)
-			startIdx := 0
-			if m.searchSelected >= maxDisplay {
-				startIdx = m.searchSelected - maxDisplay + 1
+			type EntrySpan struct {
+				StartLine int
+				EndLine   int
 			}
-			endIdx := min(len(m.searchResults), startIdx+maxDisplay)
 
-			for idx := startIdx; idx < endIdx; idx++ {
-				res := m.searchResults[idx]
+			var allResultLines []string
+			var spans []EntrySpan
+
+			for idx, res := range m.searchResults {
 				isSelected := (idx == m.searchSelected)
+				start := len(allResultLines)
 
 				header := formatBreadcrumb(res.RelPath, res.LineNum, isSelected, drawerInnerWidth-4)
-				resultsLines = append(resultsLines, header)
+				allResultLines = append(allResultLines, header)
 
 				for _, c := range res.ContextLines {
 					cLine := formatContextLine(c, query, isSelected, drawerInnerWidth-6)
-					resultsLines = append(resultsLines, cLine)
+					allResultLines = append(allResultLines, cLine)
 				}
 
-				if idx < endIdx-1 {
-					resultsLines = append(resultsLines, "")
-					sep := lipgloss.NewStyle().Foreground(lipgloss.Color("#2E303E")).Background(ui.ColorDarkSlate).Render("      " + strings.Repeat("─", min(60, drawerInnerWidth-14)))
-					resultsLines = append(resultsLines, sep, "")
+				end := len(allResultLines) - 1
+				spans = append(spans, EntrySpan{StartLine: start, EndLine: end})
+
+				// Clean blank line spacing between entries (no horizontal divider rule)
+				if idx < len(m.searchResults)-1 {
+					allResultLines = append(allResultLines, "")
 				}
+			}
+
+			availHeight := max(4, drawerContentHeight-4)
+
+			scrollOffset := 0
+			if len(spans) > 0 && m.searchSelected >= 0 && m.searchSelected < len(spans) {
+				span := spans[m.searchSelected]
+				if span.EndLine >= scrollOffset+availHeight {
+					scrollOffset = span.EndLine - availHeight + 1
+				}
+				if span.StartLine < scrollOffset {
+					scrollOffset = span.StartLine
+				}
+				if scrollOffset < 0 {
+					scrollOffset = 0
+				}
+			}
+
+			visibleEnd := min(len(allResultLines), scrollOffset+availHeight)
+			if scrollOffset < len(allResultLines) {
+				resultsLines = allResultLines[scrollOffset:visibleEnd]
 			}
 		}
 
@@ -2477,8 +2516,7 @@ func formatBreadcrumb(relPath string, lineNum int, isSelected bool, maxWidth int
 }
 
 func formatContextLine(c ContextLine, query string, isSelected bool, maxWidth int) string {
-	guide := lipgloss.NewStyle().Foreground(lipgloss.Color("#3A3D4D")).Background(ui.ColorDarkSlate).Render("│ ")
-	indent := "      " + guide
+	indent := "  "
 
 	s := strings.TrimRight(c.Text, "\r")
 	if strings.TrimSpace(s) == "" {
@@ -2488,8 +2526,8 @@ func formatContextLine(c ContextLine, query string, isSelected bool, maxWidth in
 	if !c.IsMatch {
 		// Context line: faint / muted, soft slate text with background
 		style := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("#8A8F9E")).Background(ui.ColorDarkSlate)
-		if maxWidth > 12 && lipgloss.Width(s) > maxWidth-12 {
-			s = truncateWithDots(s, maxWidth-12)
+		if maxWidth > 6 && lipgloss.Width(s) > maxWidth-6 {
+			s = truncateWithDots(s, maxWidth-6)
 		}
 		return indent + style.Render(s)
 	}
@@ -2501,8 +2539,8 @@ func formatContextLine(c ContextLine, query string, isSelected bool, maxWidth in
 	idx := strings.Index(sLower, qLower)
 	if idx == -1 || q == "" {
 		style := lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate)
-		if maxWidth > 12 && lipgloss.Width(s) > maxWidth-12 {
-			s = truncateWithDots(s, maxWidth-12)
+		if maxWidth > 6 && lipgloss.Width(s) > maxWidth-6 {
+			s = truncateWithDots(s, maxWidth-6)
 		}
 		return indent + style.Render(s)
 	}
@@ -2533,7 +2571,7 @@ func formatContextLine(c ContextLine, query string, isSelected bool, maxWidth in
 		Bold(true)
 
 	rendered := indent + baseStyle.Render(before) + matchStyle.Render(match) + baseStyle.Render(after)
-	if maxWidth > 12 && lipgloss.Width(rendered) > maxWidth {
+	if maxWidth > 6 && lipgloss.Width(rendered) > maxWidth {
 		rendered = truncateWithDots(rendered, maxWidth)
 	}
 	return rendered
