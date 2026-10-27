@@ -53,8 +53,8 @@ type Model struct {
 	filterActive bool
 	filterInput  textinput.Model
 
-	// Floating Modal System (New Note, New Folder, Quick Log, Rename, Delete, Move, Search)
-	modalType       string // "", "new_note", "new_folder", "quick_log", "rename", "delete", "move", "search"
+	// Floating Modal System (New Note, New Folder, Quick Log, Rename, Delete, Move)
+	modalType       string // "", "new_note", "new_folder", "quick_log", "rename", "delete", "move"
 	modalInput      textinput.Model
 	modalDestPath   string
 	modalTargetItem *notes.Node
@@ -62,7 +62,13 @@ type Model struct {
 	moveFolders     []string
 	moveSelected    int
 
-	// Content Search (Option 2 - [Ctrl+F])
+	// Top Slide-Down Content Search Drawer (Option 2 - [Ctrl+F])
+	searchOpen     bool
+	searchSliding  bool
+	searchSlideDir int // +1 opening, -1 closing
+	searchHeight   int
+	searchTargetH  int
+	searchInput    textinput.Model
 	searchResults  []SearchResult
 	searchSelected int
 
@@ -194,6 +200,14 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 	fi.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
 	fi.CharLimit = 50
 
+	si := textinput.New()
+	si.Prompt = "🔍 "
+	si.PromptStyle = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Bold(true)
+	si.Placeholder = "Search note contents (e.g. dragon, quest, spell)..."
+	si.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright)
+	si.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
+	si.CharLimit = 80
+
 	m := Model{
 		config:        cfg,
 		workspacePath: workspacePath,
@@ -204,6 +218,7 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 		activePane:    0,
 		editor:        ta,
 		filterInput:   fi,
+		searchInput:   si,
 		aiInput:       ti,
 		aiState:       "idle",
 		modalInput:    mi,
@@ -374,6 +389,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.searchSliding {
+			if m.searchSlideDir > 0 {
+				m.searchHeight += 4
+				if m.searchHeight >= m.searchTargetH {
+					m.searchHeight = m.searchTargetH
+					m.searchSliding = false
+					m.searchInput.Focus()
+				} else {
+					cmds = append(cmds, slideTick())
+				}
+			} else {
+				m.searchHeight -= 4
+				if m.searchHeight <= 0 {
+					m.searchHeight = 0
+					m.searchSliding = false
+					m.searchOpen = false
+					m.searchInput.Blur()
+				} else {
+					cmds = append(cmds, slideTick())
+				}
+			}
+		}
+
 	case animTickMsg:
 		if m.aiState == "thinking" {
 			m.aiAnimStep++
@@ -404,40 +442,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.modalType = ""
 				m.modalError = ""
 				m.modalTargetItem = nil
-				m.searchResults = nil
-				m.searchSelected = 0
 				m.modalInput.Blur()
 				return m, nil
 
-			case "up":
-				if m.modalType == "move" {
-					if m.moveSelected > 0 {
-						m.moveSelected--
-					}
-					return m, nil
-				}
-				if m.modalType == "search" {
-					if m.searchSelected > 0 {
-						m.searchSelected--
-					}
-					return m, nil
-				}
-
-			case "down":
-				if m.modalType == "move" {
-					if m.moveSelected < len(m.moveFolders)-1 {
-						m.moveSelected++
-					}
-					return m, nil
-				}
-				if m.modalType == "search" {
-					if m.searchSelected < len(m.searchResults)-1 {
-						m.searchSelected++
-					}
-					return m, nil
-				}
-
-			case "k", "w":
+			case "up", "k", "w":
 				if m.modalType == "move" {
 					if m.moveSelected > 0 {
 						m.moveSelected--
@@ -445,7 +453,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
-			case "j", "s":
+			case "down", "j", "s":
 				if m.modalType == "move" {
 					if m.moveSelected < len(m.moveFolders)-1 {
 						m.moveSelected++
@@ -487,33 +495,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "move":
 					m.confirmMove()
 					return m, nil
-				case "search":
-					if len(m.searchResults) > 0 && m.searchSelected >= 0 && m.searchSelected < len(m.searchResults) {
-						res := m.searchResults[m.searchSelected]
-						targetPath := res.Path
-						targetLine := res.LineNum
-						m.modalType = ""
-						m.modalInput.Blur()
-						m.searchResults = nil
-
-						m.rescanTreePreservingExpansion(targetPath)
-						cleanTarget := filepath.Clean(targetPath)
-						for vIdx, id := range m.visibleIndices {
-							for idx := range m.allNodes {
-								if m.allNodes[idx].ID == id && filepath.Clean(m.allNodes[idx].Path) == cleanTarget {
-									m.selectedIdx = vIdx
-									break
-								}
-							}
-						}
-						m.activePane = 1
-						if m.viewport.Width > 0 {
-							m.viewport.SetContent(m.renderActivePreview(m.viewport.Width))
-							m.viewport.SetYOffset(max(0, targetLine-3))
-						}
-						return m, nil
-					}
-					return m, nil
 				}
 				m.modalType = ""
 				m.modalInput.Blur()
@@ -527,10 +508,65 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			var tiCmd tea.Cmd
 			m.modalInput, tiCmd = m.modalInput.Update(msg)
-			if m.modalType == "search" {
-				m.performContentSearch(m.modalInput.Value())
-			}
 			return m, tiCmd
+		}
+
+		// When top Search Drawer is open, route keys to search
+		if m.searchOpen && !m.searchSliding {
+			switch msg.String() {
+			case "esc", "ctrl+f":
+				m.searchSliding = true
+				m.searchSlideDir = -1
+				m.searchInput.Blur()
+				return m, slideTick()
+
+			case "up":
+				if m.searchSelected > 0 {
+					m.searchSelected--
+				}
+				return m, nil
+
+			case "down":
+				if m.searchSelected < len(m.searchResults)-1 {
+					m.searchSelected++
+				}
+				return m, nil
+
+			case "enter":
+				if len(m.searchResults) > 0 && m.searchSelected >= 0 && m.searchSelected < len(m.searchResults) {
+					res := m.searchResults[m.searchSelected]
+					targetPath := res.Path
+					targetLine := res.LineNum
+
+					m.searchOpen = false
+					m.searchSliding = false
+					m.searchHeight = 0
+					m.searchInput.Blur()
+
+					m.rescanTreePreservingExpansion(targetPath)
+					cleanTarget := filepath.Clean(targetPath)
+					for vIdx, id := range m.visibleIndices {
+						for idx := range m.allNodes {
+							if m.allNodes[idx].ID == id && filepath.Clean(m.allNodes[idx].Path) == cleanTarget {
+								m.selectedIdx = vIdx
+								break
+							}
+						}
+					}
+					m.activePane = 1
+					if m.viewport.Width > 0 {
+						m.viewport.SetContent(m.renderActivePreview(m.viewport.Width))
+						m.viewport.SetYOffset(max(0, targetLine-3))
+					}
+					return m, nil
+				}
+				return m, nil
+			}
+
+			var siCmd tea.Cmd
+			m.searchInput, siCmd = m.searchInput.Update(msg)
+			m.performContentSearch(m.searchInput.Value())
+			return m, siCmd
 		}
 
 		// When in in-place note editor mode, route keys directly to editor
@@ -893,12 +929,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.filterInput.Focus()
 
 		case "ctrl+f":
-			m.modalType = "search"
-			m.modalInput.Reset()
-			m.modalInput.Placeholder = "Search note contents (e.g. dragon)..."
+			if m.searchOpen {
+				m.searchSliding = true
+				m.searchSlideDir = -1
+				return m, slideTick()
+			}
+			usableW := max(20, m.width-2)
+			m.searchOpen = true
+			m.searchSliding = true
+			m.searchSlideDir = 1
+			m.searchHeight = 4
+			m.searchTargetH = min(22, max(14, int(float64(m.height)*0.62)))
+			m.searchInput.Reset()
 			m.searchResults = nil
 			m.searchSelected = 0
-			return m, m.modalInput.Focus()
+			m.searchInput.Width = max(20, usableW-12)
+			return m, slideTick()
 
 		case "ctrl+k":
 			m.aiOpen = true
@@ -919,7 +965,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		if m.modalType != "" || m.aiOpen {
+		if m.modalType != "" || m.aiOpen || m.searchOpen {
 			return m, nil
 		}
 
@@ -1342,11 +1388,6 @@ func (m Model) View() string {
 	var footer string
 	if m.modalType != "" {
 		switch m.modalType {
-		case "search":
-			kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Select  ")
-			kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Jump to Note  ")
-			kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Cancel")
-			footer = " ✦ Content Search │ " + kNav + kEnter + kClose
 		case "rename":
 			kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Save Name  ")
 			kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Cancel")
@@ -1365,6 +1406,11 @@ func (m Model) View() string {
 			kClose := ui.FooterKeyStyle.Render("[Esc]") + ui.FooterDescStyle.Render(" Cancel")
 			footer = " ✦ Modal Prompt │ " + kEnter + kClose
 		}
+	} else if m.searchOpen {
+		kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Select  ")
+		kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Jump to Note  ")
+		kClose := ui.FooterKeyStyle.Render("[Esc/Ctrl+F]") + ui.FooterDescStyle.Render(" Close Search")
+		footer = " ✦ Content Search │ " + kNav + kEnter + kClose
 	} else if m.filterActive {
 		kNav := ui.FooterKeyStyle.Render("[↑/↓]") + ui.FooterDescStyle.Render(" Select  ")
 		kEnter := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open Note  ")
@@ -1580,12 +1626,114 @@ func (m Model) View() string {
 		}
 	}
 
-	// 8. Layered Floating Modal Overlay (New Note, New Folder, Quick Log, Rename, Delete, Move, Search)
+	// 7c. Layered Sliding Content Search Top Drawer (from top row 2)
+	if m.searchOpen && m.searchHeight > 0 {
+		drawerInnerWidth := usableWidth - 4
+		drawerContentHeight := max(2, m.searchHeight-2)
+
+		titlePrefix := "✦ TOME CONTENT SEARCH "
+		matchCount := ""
+		if len(m.searchResults) > 0 {
+			matchCount = fmt.Sprintf(" %d matches ", len(m.searchResults))
+		}
+		ruleLen := max(2, drawerInnerWidth-lipgloss.Width(titlePrefix)-lipgloss.Width(matchCount)-2)
+		statusText := titlePrefix + strings.Repeat("─", ruleLen) + matchCount
+		drawerTitle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(ui.ColorFlameOrange).
+			Render(statusText)
+
+		m.searchInput.Width = max(20, drawerInnerWidth-6)
+		inputRow := m.searchInput.View()
+
+		var resultsLines []string
+		query := strings.TrimSpace(m.searchInput.Value())
+
+		if query == "" {
+			resultsLines = append(resultsLines, ui.SubtitleStyle.Render("\n  Type keywords (e.g. dragon, quest, spell) to search across all notes in your vault."))
+		} else if len(m.searchResults) == 0 {
+			resultsLines = append(resultsLines, ui.SubtitleStyle.Render(fmt.Sprintf("\n  No notes found matching %q.", query)))
+		} else {
+			entryHeight := 3
+			maxDisplay := max(1, (drawerContentHeight-4)/entryHeight)
+			startIdx := 0
+			if m.searchSelected >= maxDisplay {
+				startIdx = m.searchSelected - maxDisplay + 1
+			}
+			endIdx := min(len(m.searchResults), startIdx+maxDisplay)
+
+			for idx := startIdx; idx < endIdx; idx++ {
+				res := m.searchResults[idx]
+				isSelected := (idx == m.searchSelected)
+
+				header := formatBreadcrumb(res.RelPath, res.LineNum, isSelected, drawerInnerWidth-4)
+				resultsLines = append(resultsLines, header)
+
+				snip := highlightMatch(res.Snippet, query, isSelected, drawerInnerWidth-6)
+				resultsLines = append(resultsLines, snip)
+
+				if idx < endIdx-1 {
+					sep := lipgloss.NewStyle().Foreground(lipgloss.Color("#2E303E")).Render("    " + strings.Repeat("┄", min(54, drawerInnerWidth-10)))
+					resultsLines = append(resultsLines, sep)
+				}
+			}
+		}
+
+		drawerContent := fmt.Sprintf("%s\n\n%s\n\n%s", drawerTitle, inputRow, strings.Join(resultsLines, "\n"))
+
+		rawLines := strings.Split(drawerContent, "\n")
+		var clampedLines []string
+		innerContentWidth := max(10, drawerInnerWidth-2)
+
+		for idx, l := range rawLines {
+			if idx >= drawerContentHeight {
+				break
+			}
+			if lipgloss.Width(l) > innerContentWidth {
+				l = truncateWithDots(l, innerContentWidth)
+			}
+			pad := max(0, innerContentWidth-lipgloss.Width(l))
+			clampedLines = append(clampedLines, l+strings.Repeat(" ", pad))
+		}
+		for len(clampedLines) < drawerContentHeight {
+			clampedLines = append(clampedLines, strings.Repeat(" ", innerContentWidth))
+		}
+
+		searchBoxStyle := lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(ui.ColorFlameOrange).
+			BorderBackground(ui.ColorDarkSlate).
+			Background(ui.ColorDarkSlate).
+			Padding(0, 1)
+
+		searchDrawerRendered := searchBoxStyle.
+			Width(drawerInnerWidth).
+			Height(drawerContentHeight).
+			MaxHeight(m.searchHeight).
+			Render(strings.Join(clampedLines, "\n"))
+
+		drawerLines := strings.Split(searchDrawerRendered, "\n")
+		if len(drawerLines) > m.searchHeight {
+			drawerLines = drawerLines[:m.searchHeight]
+		}
+		for len(drawerLines) < m.searchHeight {
+			drawerLines = append(drawerLines, strings.Repeat(" ", usableWidth))
+		}
+
+		startRow := 2
+		footerRow := len(bgLines) - 1
+
+		for i, dLine := range drawerLines {
+			targetRow := startRow + i
+			if targetRow >= startRow && targetRow < footerRow {
+				bgLines[targetRow] = dLine
+			}
+		}
+	}
+
+	// 8. Layered Floating Modal Overlay (New Note, New Folder, Quick Log, Rename, Delete, Move)
 	if m.modalType != "" {
 		modalWidth := min(54, usableWidth-4)
-		if m.modalType == "search" {
-			modalWidth = min(76, usableWidth-4)
-		}
 		innerModalWidth := max(10, modalWidth-6)
 		modalBg := ui.ColorDarkSlate
 		borderColor := ui.ColorFlameOrange
@@ -1598,54 +1746,6 @@ func (m Model) View() string {
 		var actionHint string
 
 		switch m.modalType {
-		case "search":
-			title = ui.GradientWithBg("✦  CONTENT SEARCH", "#FF4500", "#FFD166", modalBg)
-			actionHint = "[↑/↓] Select  •  [Enter] Jump  •  [Esc] Cancel"
-
-			var resultLines []string
-			resultLines = append(resultLines, m.modalInput.View())
-			resultLines = append(resultLines, "")
-
-			if strings.TrimSpace(m.modalInput.Value()) == "" {
-				resultLines = append(resultLines, ui.SubtitleStyle.Background(modalBg).Render("  Type keywords to search across all notes..."))
-			} else if len(m.searchResults) == 0 {
-				resultLines = append(resultLines, ui.SubtitleStyle.Background(modalBg).Render("  No matching notes found."))
-			} else {
-				maxDisplay := 5
-				startIdx := 0
-				if m.searchSelected >= maxDisplay {
-					startIdx = m.searchSelected - maxDisplay + 1
-				}
-				endIdx := min(len(m.searchResults), startIdx+maxDisplay)
-
-				for idx := startIdx; idx < endIdx; idx++ {
-					res := m.searchResults[idx]
-					matchHeader := fmt.Sprintf("%s:%d", res.RelPath, res.LineNum)
-					availHeaderWidth := innerModalWidth - 4
-					if lipgloss.Width(matchHeader) > availHeaderWidth {
-						matchHeader = truncateWithDots(matchHeader, availHeaderWidth)
-					}
-
-					snippet := res.Snippet
-					availSnippetWidth := innerModalWidth - 6
-					if lipgloss.Width(snippet) > availSnippetWidth {
-						snippet = truncateWithDots(snippet, availSnippetWidth)
-					}
-
-					if idx == m.searchSelected {
-						cursor := ui.TreeCursor.Background(modalBg).Render("❯ ")
-						headerPill := ui.ActiveBadgeStyle.Render(matchHeader)
-						snipText := lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(modalBg).Render("   " + snippet)
-						resultLines = append(resultLines, cursor+headerPill, snipText)
-					} else {
-						headerText := lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Background(modalBg).Bold(true).Render("  " + matchHeader)
-						snipText := lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Background(modalBg).Render("   " + snippet)
-						resultLines = append(resultLines, headerText, snipText)
-					}
-				}
-			}
-			bodyView = strings.Join(resultLines, "\n")
-
 		case "new_note":
 			title = ui.GradientWithBg("✦  CREATE NOTE", "#FF4500", "#FFD166", modalBg)
 			bodyView = m.modalInput.View()
@@ -1759,18 +1859,30 @@ func (m Model) View() string {
 		modalBoxStyle := lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(borderColor).
+			BorderBackground(modalBg).
 			Background(modalBg).
 			Padding(1, 2)
 
-		modalRendered := modalBoxStyle.Width(modalWidth - 6).Render(modalContent)
+		modalRendered := modalBoxStyle.Width(innerModalWidth).Render(modalContent)
 		modalLines := strings.Split(modalRendered, "\n")
 		modalHeight := len(modalLines)
 		startRow := max(2, (m.height-modalHeight)/2)
 
+		mWidth := lipgloss.Width(modalLines[0])
+		leftPad := max(1, (usableWidth-mWidth)/2)
+		rightPad := max(1, usableWidth-leftPad-mWidth)
+
+		borderChar := ui.PaneStyle.GetBorderStyle().Left
+		leftBorder := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(borderChar)
+		rightBorder := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(borderChar)
+
+		leftSpace := strings.Repeat(" ", max(0, leftPad-1))
+		rightSpace := strings.Repeat(" ", max(0, rightPad-1))
+
 		for rIdx, mLine := range modalLines {
 			targetRow := startRow + rIdx
 			if targetRow >= 0 && targetRow < len(bgLines)-1 {
-				bgLines[targetRow] = lipgloss.PlaceHorizontal(usableWidth, lipgloss.Center, mLine)
+				bgLines[targetRow] = leftBorder + leftSpace + mLine + rightSpace + rightBorder
 			}
 		}
 	}
@@ -2304,6 +2416,98 @@ func (m *Model) performContentSearch(query string) {
 			}
 		}
 	}
+}
+
+func formatBreadcrumb(relPath string, lineNum int, isSelected bool, maxWidth int) string {
+	cleanRel := filepath.ToSlash(relPath)
+	parts := strings.Split(cleanRel, "/")
+
+	sep := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(" › ")
+
+	var breadParts []string
+	if len(parts) > 1 {
+		folderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C5A880"))
+		for _, f := range parts[:len(parts)-1] {
+			breadParts = append(breadParts, folderStyle.Render("📁 "+f))
+		}
+	}
+
+	fileTitle := parts[len(parts)-1]
+	fileStyle := lipgloss.NewStyle().Foreground(ui.ColorTextBright).Bold(true)
+	if isSelected {
+		fileStyle = lipgloss.NewStyle().Foreground(ui.ColorAmberGold).Bold(true)
+	}
+	breadParts = append(breadParts, fileStyle.Render("󰈙 "+fileTitle))
+
+	lineBadge := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(fmt.Sprintf(" :%d", lineNum))
+
+	fullBread := strings.Join(breadParts, sep) + lineBadge
+	if maxWidth > 6 && lipgloss.Width(fullBread) > maxWidth {
+		fullBread = truncateWithDots(fullBread, maxWidth)
+	}
+
+	if isSelected {
+		cursor := ui.TreeCursor.Background(ui.ColorDarkSlate).Render("❯ ")
+		return cursor + fullBread
+	}
+	return "  " + fullBread
+}
+
+func highlightMatch(snippet, query string, isSelected bool, maxWidth int) string {
+	q := strings.TrimSpace(query)
+	s := strings.TrimSpace(snippet)
+	if s == "" {
+		return ""
+	}
+
+	indent := "    "
+	if q == "" {
+		if isSelected {
+			return indent + lipgloss.NewStyle().Foreground(ui.ColorTextBright).Render(s)
+		}
+		return indent + lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render(s)
+	}
+
+	qLower := strings.ToLower(q)
+	sLower := strings.ToLower(s)
+	idx := strings.Index(sLower, qLower)
+	if idx == -1 {
+		if isSelected {
+			return indent + lipgloss.NewStyle().Foreground(ui.ColorTextBright).Render(s)
+		}
+		return indent + lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render(s)
+	}
+
+	// Crop snippet if line is wider than available space
+	cropStart := max(0, idx-24)
+	cropEnd := min(len(s), idx+len(q)+48)
+	before := s[cropStart:idx]
+	if cropStart > 0 {
+		before = "…" + before
+	}
+	match := s[idx : idx+len(q)]
+	after := s[idx+len(q) : cropEnd]
+	if cropEnd < len(s) {
+		after = after + "…"
+	}
+
+	var baseStyle lipgloss.Style
+	if isSelected {
+		baseStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright)
+	} else {
+		baseStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted)
+	}
+
+	matchStyle := lipgloss.NewStyle().
+		Background(ui.ColorFlameOrange).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Bold(true)
+
+	res := indent + baseStyle.Render(before) + matchStyle.Render(match) + baseStyle.Render(after)
+	if maxWidth > 10 && lipgloss.Width(res) > maxWidth {
+		res = truncateWithDots(res, maxWidth)
+	}
+	return res
 }
 
 // scrollToBottom primes the editor's viewport buffer and scrolls to the end of the note
