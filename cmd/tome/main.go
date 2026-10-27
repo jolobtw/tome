@@ -19,13 +19,20 @@ import (
 	"tome/internal/ui"
 )
 
+type ContextLine struct {
+	LineNum int
+	Text    string
+	IsMatch bool
+}
+
 type SearchResult struct {
-	NodeID   int
-	Path     string
-	Title    string
-	RelPath  string
-	LineNum  int
-	Snippet  string
+	NodeID       int
+	Path         string
+	Title        string
+	RelPath      string
+	LineNum      int
+	Snippet      string
+	ContextLines []ContextLine
 }
 
 type Model struct {
@@ -939,7 +946,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchSliding = true
 			m.searchSlideDir = 1
 			m.searchHeight = 4
-			m.searchTargetH = min(22, max(14, int(float64(m.height)*0.62)))
+			m.searchTargetH = min(36, max(20, int(float64(m.height)*0.85)))
 			m.searchInput.Reset()
 			m.searchResults = nil
 			m.searchSelected = 0
@@ -1654,7 +1661,7 @@ func (m Model) View() string {
 		} else if len(m.searchResults) == 0 {
 			resultsLines = append(resultsLines, ui.SubtitleStyle.Render(fmt.Sprintf("\n  No notes found matching %q.", query)))
 		} else {
-			entryHeight := 3
+			entryHeight := 5
 			maxDisplay := max(1, (drawerContentHeight-4)/entryHeight)
 			startIdx := 0
 			if m.searchSelected >= maxDisplay {
@@ -1669,12 +1676,15 @@ func (m Model) View() string {
 				header := formatBreadcrumb(res.RelPath, res.LineNum, isSelected, drawerInnerWidth-4)
 				resultsLines = append(resultsLines, header)
 
-				snip := highlightMatch(res.Snippet, query, isSelected, drawerInnerWidth-6)
-				resultsLines = append(resultsLines, snip)
+				for _, c := range res.ContextLines {
+					cLine := formatContextLine(c, query, isSelected, drawerInnerWidth-6)
+					resultsLines = append(resultsLines, cLine)
+				}
 
 				if idx < endIdx-1 {
-					sep := lipgloss.NewStyle().Foreground(lipgloss.Color("#2E303E")).Render("    " + strings.Repeat("┄", min(54, drawerInnerWidth-10)))
-					resultsLines = append(resultsLines, sep)
+					resultsLines = append(resultsLines, "")
+					sep := lipgloss.NewStyle().Foreground(lipgloss.Color("#2E303E")).Background(ui.ColorDarkSlate).Render("      " + strings.Repeat("─", min(60, drawerInnerWidth-14)))
+					resultsLines = append(resultsLines, sep, "")
 				}
 			}
 		}
@@ -1692,11 +1702,10 @@ func (m Model) View() string {
 			if lipgloss.Width(l) > innerContentWidth {
 				l = truncateWithDots(l, innerContentWidth)
 			}
-			pad := max(0, innerContentWidth-lipgloss.Width(l))
-			clampedLines = append(clampedLines, l+strings.Repeat(" ", pad))
+			clampedLines = append(clampedLines, padRightWithBg(l, innerContentWidth, ui.ColorDarkSlate))
 		}
 		for len(clampedLines) < drawerContentHeight {
-			clampedLines = append(clampedLines, strings.Repeat(" ", innerContentWidth))
+			clampedLines = append(clampedLines, padRightWithBg("", innerContentWidth, ui.ColorDarkSlate))
 		}
 
 		searchBoxStyle := lipgloss.NewStyle().
@@ -1717,7 +1726,7 @@ func (m Model) View() string {
 			drawerLines = drawerLines[:m.searchHeight]
 		}
 		for len(drawerLines) < m.searchHeight {
-			drawerLines = append(drawerLines, strings.Repeat(" ", usableWidth))
+			drawerLines = append(drawerLines, padRightWithBg("", usableWidth, ui.ColorDarkSlate))
 		}
 
 		startRow := 2
@@ -2402,15 +2411,29 @@ func (m *Model) performContentSearch(query string) {
 				if snippet == "" {
 					snippet = "(empty line match)"
 				}
+				// Build up to 3 context lines: [lineIdx-1, lineIdx, lineIdx+1]
+				var contextLines []ContextLine
+				startLine := max(0, lineIdx-1)
+				endLine := min(len(lines)-1, lineIdx+1)
+				for cIdx := startLine; cIdx <= endLine; cIdx++ {
+					cText := strings.TrimRight(lines[cIdx], "\r")
+					contextLines = append(contextLines, ContextLine{
+						LineNum: cIdx + 1,
+						Text:    cText,
+						IsMatch: cIdx == lineIdx,
+					})
+				}
+
 				m.searchResults = append(m.searchResults, SearchResult{
-					NodeID:  node.ID,
-					Path:    node.Path,
-					Title:   node.Title,
-					RelPath: node.RelPath,
-					LineNum: lineIdx + 1,
-					Snippet: snippet,
+					NodeID:       node.ID,
+					Path:         node.Path,
+					Title:        node.Title,
+					RelPath:      node.RelPath,
+					LineNum:      lineIdx + 1,
+					Snippet:      snippet,
+					ContextLines: contextLines,
 				})
-				if len(m.searchResults) >= 30 {
+				if len(m.searchResults) >= 40 {
 					return
 				}
 			}
@@ -2422,24 +2445,24 @@ func formatBreadcrumb(relPath string, lineNum int, isSelected bool, maxWidth int
 	cleanRel := filepath.ToSlash(relPath)
 	parts := strings.Split(cleanRel, "/")
 
-	sep := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(" › ")
+	sep := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Background(ui.ColorDarkSlate).Render(" › ")
 
 	var breadParts []string
 	if len(parts) > 1 {
-		folderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C5A880"))
+		folderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C5A880")).Background(ui.ColorDarkSlate)
 		for _, f := range parts[:len(parts)-1] {
 			breadParts = append(breadParts, folderStyle.Render("📁 "+f))
 		}
 	}
 
 	fileTitle := parts[len(parts)-1]
-	fileStyle := lipgloss.NewStyle().Foreground(ui.ColorTextBright).Bold(true)
+	fileStyle := lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate).Bold(true)
 	if isSelected {
-		fileStyle = lipgloss.NewStyle().Foreground(ui.ColorAmberGold).Bold(true)
+		fileStyle = lipgloss.NewStyle().Foreground(ui.ColorAmberGold).Background(ui.ColorDarkSlate).Bold(true)
 	}
 	breadParts = append(breadParts, fileStyle.Render("󰈙 "+fileTitle))
 
-	lineBadge := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(fmt.Sprintf(" :%d", lineNum))
+	lineBadge := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Background(ui.ColorDarkSlate).Render(fmt.Sprintf(" :%d", lineNum))
 
 	fullBread := strings.Join(breadParts, sep) + lineBadge
 	if maxWidth > 6 && lipgloss.Width(fullBread) > maxWidth {
@@ -2453,34 +2476,40 @@ func formatBreadcrumb(relPath string, lineNum int, isSelected bool, maxWidth int
 	return "  " + fullBread
 }
 
-func highlightMatch(snippet, query string, isSelected bool, maxWidth int) string {
-	q := strings.TrimSpace(query)
-	s := strings.TrimSpace(snippet)
-	if s == "" {
-		return ""
+func formatContextLine(c ContextLine, query string, isSelected bool, maxWidth int) string {
+	guide := lipgloss.NewStyle().Foreground(lipgloss.Color("#3A3D4D")).Background(ui.ColorDarkSlate).Render("│ ")
+	indent := "      " + guide
+
+	s := strings.TrimRight(c.Text, "\r")
+	if strings.TrimSpace(s) == "" {
+		s = " "
 	}
 
-	indent := "    "
-	if q == "" {
-		if isSelected {
-			return indent + lipgloss.NewStyle().Foreground(ui.ColorTextBright).Render(s)
+	if !c.IsMatch {
+		// Context line: faint / muted, soft slate text with background
+		style := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("#8A8F9E")).Background(ui.ColorDarkSlate)
+		if maxWidth > 12 && lipgloss.Width(s) > maxWidth-12 {
+			s = truncateWithDots(s, maxWidth-12)
 		}
-		return indent + lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render(s)
+		return indent + style.Render(s)
 	}
 
+	// Match line
+	q := strings.TrimSpace(query)
 	qLower := strings.ToLower(q)
 	sLower := strings.ToLower(s)
 	idx := strings.Index(sLower, qLower)
-	if idx == -1 {
-		if isSelected {
-			return indent + lipgloss.NewStyle().Foreground(ui.ColorTextBright).Render(s)
+	if idx == -1 || q == "" {
+		style := lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate)
+		if maxWidth > 12 && lipgloss.Width(s) > maxWidth-12 {
+			s = truncateWithDots(s, maxWidth-12)
 		}
-		return indent + lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render(s)
+		return indent + style.Render(s)
 	}
 
-	// Crop snippet if line is wider than available space
+	// Crop long line around match
 	cropStart := max(0, idx-24)
-	cropEnd := min(len(s), idx+len(q)+48)
+	cropEnd := min(len(s), idx+len(q)+50)
 	before := s[cropStart:idx]
 	if cropStart > 0 {
 		before = "…" + before
@@ -2493,9 +2522,9 @@ func highlightMatch(snippet, query string, isSelected bool, maxWidth int) string
 
 	var baseStyle lipgloss.Style
 	if isSelected {
-		baseStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright)
+		baseStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate)
 	} else {
-		baseStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted)
+		baseStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#C0C5D0")).Background(ui.ColorDarkSlate)
 	}
 
 	matchStyle := lipgloss.NewStyle().
@@ -2503,11 +2532,11 @@ func highlightMatch(snippet, query string, isSelected bool, maxWidth int) string
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Bold(true)
 
-	res := indent + baseStyle.Render(before) + matchStyle.Render(match) + baseStyle.Render(after)
-	if maxWidth > 10 && lipgloss.Width(res) > maxWidth {
-		res = truncateWithDots(res, maxWidth)
+	rendered := indent + baseStyle.Render(before) + matchStyle.Render(match) + baseStyle.Render(after)
+	if maxWidth > 12 && lipgloss.Width(rendered) > maxWidth {
+		rendered = truncateWithDots(rendered, maxWidth)
 	}
-	return res
+	return rendered
 }
 
 // scrollToBottom primes the editor's viewport buffer and scrolls to the end of the note
