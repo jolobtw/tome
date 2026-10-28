@@ -72,6 +72,22 @@ tome
 go install github.com/jolobtw/tome/cmd/tome@latest
 ```
 
+### 📂 Choosing Your Notes Folder
+
+Tome can open your default vault or any custom folder you choose:
+
+```bash
+# Open your default vault (~/Notes)
+tome
+
+# Open the current directory
+tome .
+
+# Open any specific notes directory
+tome ~/Documents/WorkNotes
+```
+*(Tome will remember your chosen folder as your active notebook for future sessions).*
+
 ---
 
 ### 🪟 Windows (Windows Terminal / PowerShell)

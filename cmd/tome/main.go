@@ -140,6 +140,28 @@ var arcaneSpinners = []string{
 func initialModel() Model {
 	cfg := notes.LoadConfig()
 	workspacePath := cfg.ActiveNotebook
+
+	// Allow passing a folder path via command-line argument: e.g. `tome ~/Documents/Notes` or `tome .`
+	if len(os.Args) > 1 {
+		argPath := os.Args[1]
+		if argPath != "" && argPath != "-h" && argPath != "--help" {
+			if strings.HasPrefix(argPath, "~") {
+				home, _ := os.UserHomeDir()
+				argPath = filepath.Join(home, strings.TrimPrefix(argPath, "~"))
+			}
+			absPath, err := filepath.Abs(argPath)
+			if err == nil {
+				// Create directory if it does not exist yet
+				_ = os.MkdirAll(absPath, 0755)
+				if stat, err := os.Stat(absPath); err == nil && stat.IsDir() {
+					workspacePath = absPath
+					cfg.ActiveNotebook = absPath
+					_ = notes.SaveConfig(cfg)
+				}
+			}
+		}
+	}
+
 	workspaceName := filepath.Base(workspacePath)
 
 	allNodes, isObsidian, _ := notes.ScanTree(workspacePath, cfg.SortMode)
