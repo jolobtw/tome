@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,12 @@ var (
 	ColorRed          = lipgloss.Color("#F38BA8")
 	ColorCrimson      = lipgloss.Color("#FF4D4D")
 	ColorPurple       = lipgloss.Color("#CBA6F7")
+
+	// Backdrop Scrim / Dimmed Tokens
+	ColorDimmedText   = lipgloss.Color("#3E4259")
+	ColorDimmedBorder = lipgloss.Color("#1A1C28")
+	ColorDimmedAccent = lipgloss.Color("#663100")
+	ColorDimmedCanvas = lipgloss.Color("#0A0B0F")
 )
 
 // UI Element Styles
@@ -207,6 +214,13 @@ type ThemeFile struct {
 		DividerGlyph   string   `json:"divider_glyph"`
 		DividerColor   string   `json:"divider_color"`
 	} `json:"header"`
+	Backdrop struct {
+		DimOpacity   float64 `json:"dim_opacity"`
+		DimmedText   string  `json:"dimmed_text"`
+		DimmedBorder string  `json:"dimmed_border"`
+		DimmedAccent string  `json:"dimmed_accent"`
+		DimmedCanvas string  `json:"dimmed_canvas"`
+	} `json:"backdrop"`
 }
 
 func RefreshStyles() {
@@ -272,6 +286,18 @@ func ApplyTheme(th ThemeFile) {
 	}
 	if th.Palette.FolderWarm != "" {
 		TreeNormalFolder = lipgloss.NewStyle().Foreground(lipgloss.Color(th.Palette.FolderWarm))
+	}
+	if th.Backdrop.DimmedText != "" {
+		ColorDimmedText = lipgloss.Color(th.Backdrop.DimmedText)
+	}
+	if th.Backdrop.DimmedBorder != "" {
+		ColorDimmedBorder = lipgloss.Color(th.Backdrop.DimmedBorder)
+	}
+	if th.Backdrop.DimmedAccent != "" {
+		ColorDimmedAccent = lipgloss.Color(th.Backdrop.DimmedAccent)
+	}
+	if th.Backdrop.DimmedCanvas != "" {
+		ColorDimmedCanvas = lipgloss.Color(th.Backdrop.DimmedCanvas)
 	}
 	RefreshStyles()
 }
@@ -346,4 +372,34 @@ func FormatHeader(appTitle, tagline string, badges []string, width int) (row1, r
 	row1 = " " + leftPart + strings.Repeat(" ", gap) + rightPart
 	row2 = lipgloss.NewStyle().Foreground(ColorBorderMuted).Render(strings.Repeat("─", width))
 	return row1, row2
+}
+
+var (
+	ansiFgRegex = regexp.MustCompile(`\x1b\[38;2;(\d+);(\d+);(\d+)m`)
+	ansiBgRegex = regexp.MustCompile(`\x1b\[48;2;(\d+);(\d+);(\d+)m`)
+)
+
+// DimANSILine scales down TrueColor RGB sequences in an ANSI line to produce a subtle dimmed backdrop
+func DimANSILine(s string, factor float64) string {
+	s = ansiFgRegex.ReplaceAllStringFunc(s, func(m string) string {
+		sub := ansiFgRegex.FindStringSubmatch(m)
+		r, _ := strconv.Atoi(sub[1])
+		g, _ := strconv.Atoi(sub[2])
+		b, _ := strconv.Atoi(sub[3])
+		dimR := int(float64(r) * factor)
+		dimG := int(float64(g) * factor)
+		dimB := int(float64(b) * factor)
+		return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", dimR, dimG, dimB)
+	})
+	s = ansiBgRegex.ReplaceAllStringFunc(s, func(m string) string {
+		sub := ansiBgRegex.FindStringSubmatch(m)
+		r, _ := strconv.Atoi(sub[1])
+		g, _ := strconv.Atoi(sub[2])
+		b, _ := strconv.Atoi(sub[3])
+		dimR := int(float64(r) * factor)
+		dimG := int(float64(g) * factor)
+		dimB := int(float64(b) * factor)
+		return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", dimR, dimG, dimB)
+	})
+	return s
 }

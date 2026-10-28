@@ -23,7 +23,7 @@ import (
 	"github.com/jolobtw/tome/internal/ui"
 )
 
-const AppVersion = "v1.0.5"
+const AppVersion = "v1.0.6"
 
 type ContextLine struct {
 	LineNum int
@@ -1289,6 +1289,7 @@ func (m Model) View() string {
 	footerHeight := 1
 	panesHeight := max(4, m.height-headerHeight-footerHeight)
 	panesContentHeight := panesHeight - 2
+	isOverlayOpen := m.modalType != "" || m.searchOpen || m.aiOpen || m.cheatSheetOpen
 
 	leftTotalWidth := max(34, min(52, usableWidth*36/100))
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
@@ -1398,7 +1399,7 @@ func (m Model) View() string {
 	}
 
 	leftStyle := ui.PaneStyle
-	if m.activePane == 0 {
+	if !isOverlayOpen && m.activePane == 0 {
 		leftStyle = ui.ActivePaneStyle
 	}
 	leftView := leftStyle.
@@ -1408,7 +1409,7 @@ func (m Model) View() string {
 
 	// 3. Preview/Editor Pane (Right)
 	rightStyle := ui.PaneStyle
-	if m.inEditMode || m.activePane == 1 {
+	if !isOverlayOpen && (m.inEditMode || m.activePane == 1) {
 		rightStyle = ui.ActivePaneStyle
 	}
 
@@ -1547,6 +1548,14 @@ func (m Model) View() string {
 	// 6. Base Full-Screen Background
 	fullScreen := lipgloss.JoinVertical(lipgloss.Left, headerBlock, panesView, footer)
 	bgLines := strings.Split(fullScreen, "\n")
+
+	// Apply Backdrop Scrim Dimming if an overlay (modal dialog or sliding drawer) is active
+	if isOverlayOpen && len(bgLines) > 0 {
+		dimEnd := len(bgLines) - 1 // keep the modal/drawer action footer bright
+		for i := 0; i < dimEnd; i++ {
+			bgLines[i] = ui.DimANSILine(bgLines[i], 0.35)
+		}
+	}
 
 	// 7. Layered Sliding AI Drawer
 	if m.aiOpen && m.animHeight > 0 {

@@ -1,5 +1,15 @@
 # Tome Release Notes
 
+## Version 1.0.6
+**Date:** 2026-10-28
+
+### Backdrop Scrim & Modal Dimming
+- **TrueColor Backdrop Dimming:** Whenever a floating popup (New Note, Rename, Delete, Move) or sliding drawer (Search, Cloud AI, Formatting Guide) opens, the entire surrounding background (header, panes, borders, and tree items) automatically dims to 35% brightness into deep obsidian shadows.
+- **Visual Focus Hierarchy:** Active pane borders and selection highlights yield focus to the modal/drawer, while the bottom action key legend stays crisp and vibrant.
+- **Arcane Theme Tokens:** Dimming tokens are now sourced directly from `github.com/jolobtw/arcane-theme`.
+
+---
+
 ## Version 1.0.5
 **Date:** 2026-10-28
 
