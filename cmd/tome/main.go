@@ -14,9 +14,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"tome/internal/markdown"
-	"tome/internal/notes"
-	"tome/internal/ui"
+	"github.com/jolobtw/tome/internal/markdown"
+	"github.com/jolobtw/tome/internal/notes"
+	"github.com/jolobtw/tome/internal/ui"
 )
 
 type ContextLine struct {

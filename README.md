@@ -52,12 +52,34 @@ A high-velocity, aesthetic terminal notebook for browsing, writing, and organizi
 
 ---
 
-## 🛠️ Building & Running
+## 🛠️ Installation & Running
 
+### 🍎 macOS (Ghostty / Terminal)
+
+**Option 1: Quick Install (Pre-compiled Binary — No Go needed)**
 ```bash
+# Apple Silicon (M1/M2/M3/M4)
+curl -L -o tome https://github.com/jolobtw/tome/releases/latest/download/tome-darwin-arm64
+chmod +x tome
+sudo mv tome /usr/local/bin/
+
+# Launch Tome
+tome
+```
+
+**Option 2: Install with Go**
+```bash
+go install github.com/jolobtw/tome/cmd/tome@latest
+```
+
+---
+
+### 🪟 Windows (Windows Terminal / PowerShell)
+
+```powershell
 # Build binary
 go build -o tome.exe ./cmd/tome
 
 # Run
-./tome.exe
+.\tome.exe
 ```

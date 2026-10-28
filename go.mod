@@ -1,4 +1,4 @@
-module tome
+module github.com/jolobtw/tome
 
 go 1.27.0
 

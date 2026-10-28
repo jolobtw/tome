@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"tome/internal/ui"
+	"github.com/jolobtw/tome/internal/ui"
 )
 
 var (
