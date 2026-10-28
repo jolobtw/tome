@@ -1,5 +1,15 @@
 # Tome Release Notes
 
+## Version 1.0.5
+**Date:** 2026-10-28
+
+### Live Auto-Sync Arcane Design System Integration
+- **Cross-App Theme Sync:** Tome now natively connects to `github.com/jolobtw/arcane-theme`.
+- **Local Cache & Non-Blocking Background Fetch:** On launch, Tome instantly applies `~/.config/arcane/theme.json` (< 1ms) and silently queries GitHub for theme updates in the background.
+- **Dynamic Palette Reloading:** Any future color, glyph, or header formula changes published to `arcane-theme` automatically reflect in Tome without requiring code recompilation.
+
+---
+
 ## Version 1.0.4
 **Date:** 2026-10-28
 

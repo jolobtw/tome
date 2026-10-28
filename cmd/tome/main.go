@@ -23,7 +23,7 @@ import (
 	"github.com/jolobtw/tome/internal/ui"
 )
 
-const AppVersion = "v1.0.4"
+const AppVersion = "v1.0.5"
 
 type ContextLine struct {
 	LineNum int
@@ -148,6 +148,7 @@ var arcaneSpinners = []string{
 }
 
 func initialModel() Model {
+	ui.InitAutoSyncTheme()
 	cfg := notes.LoadConfig()
 	workspacePath := cfg.ActiveNotebook
 
@@ -1293,12 +1294,6 @@ func (m Model) View() string {
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
 	// 1. Header Banner
-	starGlyph := lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Bold(true).Render("✦")
-	sepGlyph := lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render("❖")
-	titleGradient := ui.Gradient("❖ TOME", "#FF4500", "#FFD166")
-	bannerLeft := fmt.Sprintf("%s %s %s %s", starGlyph, titleGradient, sepGlyph, ui.SubtitleStyle.Render("The Arcane Terminal Notebook"))
-
-	// Friendly workspace path display
 	friendlyPath := m.workspacePath
 	homeDir, _ := os.UserHomeDir()
 	if strings.HasPrefix(friendlyPath, homeDir) {
@@ -1325,17 +1320,7 @@ func (m Model) View() string {
 		verBadge = ui.BadgeStyle.Render(AppVersion)
 	}
 
-	bannerRight := fmt.Sprintf("%s %s %s", wsBadge, vaultBadge, verBadge)
-
-	leftLen := lipgloss.Width(bannerLeft)
-	rightLen := lipgloss.Width(bannerRight)
-	if leftLen+rightLen+2 > usableWidth {
-		bannerLeft = fmt.Sprintf("%s %s", starGlyph, titleGradient)
-		leftLen = lipgloss.Width(bannerLeft)
-	}
-	gap := max(1, usableWidth-leftLen-rightLen-2)
-	row1 := " " + bannerLeft + strings.Repeat(" ", gap) + bannerRight
-	row2 := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", usableWidth))
+	row1, row2 := ui.FormatHeader("TOME", "The Arcane Terminal Notebook", []string{wsBadge, vaultBadge, verBadge}, usableWidth)
 	headerBlock := lipgloss.JoinVertical(lipgloss.Left, row1, row2)
 
 	// 2. Tree Pane (Left)
