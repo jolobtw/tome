@@ -1,5 +1,17 @@
 # Tome Release Notes
 
+## Version 1.0.7
+**Date:** 2026-10-28
+
+### Tree Viewport Scrolling & Outline Bullet Support
+- **Full Viewport Scrolling for Tree Pane:** Notes lists longer than the terminal window height now smoothly scroll as you navigate down or use the mouse wheel, keeping the active cursor in view.
+- **Tree Navigation Keys:** Added `Home`, `End`, `PgUp`, and `PgDown` shortcut navigation in the tree pane to instantly jump or page through long hierarchies.
+- **Mouse Click & Scroll Sync:** Mouse wheel scrolling and mouse clicks in the tree pane now accurately account for the scroll offset.
+- **Multi-Hyphen Outline Bullets:** Markdown preview now formats shorthand sub-bullets (`-- `, `--- `) with nested indentation and distinct bullet glyphs (`•`, `◦`, `▪`).
+- **Sub-Bullet Checklists:** Shorthand multi-hyphen checklists (e.g. `-- [ ]`, `--- [x]`) now render correctly with nested indentation.
+
+---
+
 ## Version 1.0.6
 **Date:** 2026-10-28
 

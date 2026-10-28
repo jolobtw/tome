@@ -187,67 +187,70 @@ func RenderDocument(raw string, width int) string {
 			continue
 		}
 
-		// 5. Checklists (with proper indented wrapping)
-		if strings.HasPrefix(trimmed, "- [x]") || strings.HasPrefix(trimmed, "* [x]") ||
-			strings.HasPrefix(trimmed, "- [X]") || strings.HasPrefix(trimmed, "* [X]") {
-			body := strings.TrimPrefix(trimmed[5:], " ")
+		// 5. Checklists (with proper indented wrapping and multi-dash support)
+		cDashCount := 0
+		for cDashCount < len(trimmed) && (trimmed[cDashCount] == '-' || trimmed[cDashCount] == '*' || trimmed[cDashCount] == '+') {
+			cDashCount++
+		}
+		var isChecklist bool
+		var isChecked bool
+		var checkBody string
+		if cDashCount > 0 {
+			after := trimmed[cDashCount:]
+			if strings.HasPrefix(after, " [x] ") || strings.HasPrefix(after, " [X] ") {
+				isChecklist = true
+				isChecked = true
+				checkBody = strings.TrimPrefix(after[5:], " ")
+			} else if strings.HasPrefix(after, " [ ] ") {
+				isChecklist = true
+				isChecked = false
+				checkBody = strings.TrimPrefix(after[5:], " ")
+			}
+		}
+
+		if isChecklist {
 			rawLeading := len(line) - len(strings.TrimLeft(line, " \t"))
-			depth := min(4, rawLeading/2)
+			depth := min(4, rawLeading/2+(cDashCount-1))
 			baseMargin := strings.Repeat("  ", depth+1)
-			chk := lipgloss.NewStyle().Foreground(ui.ColorGreen).Bold(true).Render(baseMargin + "✔ ")
+			var prefixStr string
+			if isChecked {
+				prefixStr = lipgloss.NewStyle().Foreground(ui.ColorGreen).Bold(true).Render(baseMargin + "\u2714 ")
+			} else {
+				prefixStr = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render(baseMargin + "\u25cb ")
+			}
 			indent := baseMargin + "  "
 
 			availWidth := max(10, width-len(indent)-4)
-			wrapped := wrapText(formatInlineText(body), availWidth)
+			wrapped := wrapText(formatInlineText(checkBody), availWidth)
 			for idx, wLine := range wrapped {
 				if idx == 0 {
-					rendered = append(rendered, chk+wLine)
+					rendered = append(rendered, prefixStr+wLine)
 				} else {
 					rendered = append(rendered, indent+wLine)
 				}
 			}
 			continue
 		}
-		if strings.HasPrefix(trimmed, "- [ ]") || strings.HasPrefix(trimmed, "* [ ]") {
-			body := strings.TrimPrefix(trimmed[5:], " ")
+
+		// 6. Bullet lists (with proper indented nesting, wrapping, and multi-dash outline shorthand)
+		if cDashCount > 0 && cDashCount < len(trimmed) && trimmed[cDashCount] == ' ' {
+			body := strings.TrimLeft(trimmed[cDashCount:], " ")
+
 			rawLeading := len(line) - len(strings.TrimLeft(line, " \t"))
-			depth := min(4, rawLeading/2)
-			baseMargin := strings.Repeat("  ", depth+1)
-			unchk := lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render(baseMargin + "○ ")
-			indent := baseMargin + "  "
-
-			availWidth := max(10, width-len(indent)-4)
-			wrapped := wrapText(formatInlineText(body), availWidth)
-			for idx, wLine := range wrapped {
-				if idx == 0 {
-					rendered = append(rendered, unchk+wLine)
-				} else {
-					rendered = append(rendered, indent+wLine)
-				}
-			}
-			continue
-		}
-
-		// 6. Bullet lists (with proper indented nesting and wrapping)
-		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
-			body := trimmed[2:]
-
-			// Count leading spaces/tabs on original line to determine nesting depth
-			rawLeading := len(line) - len(strings.TrimLeft(line, " \t"))
-			depth := min(4, rawLeading/2)
+			depth := min(4, rawLeading/2+(cDashCount-1))
 
 			// Choose bullet glyph and color according to nesting level
 			var bulletGlyph string
 			var bulletColor lipgloss.Color
 			switch depth {
 			case 0:
-				bulletGlyph = "• "
+				bulletGlyph = "\u2022 "
 				bulletColor = ui.ColorAmberGold
 			case 1:
-				bulletGlyph = "◦ "
+				bulletGlyph = "\u25e6 "
 				bulletColor = ui.ColorGoldGlow
 			default:
-				bulletGlyph = "▪ "
+				bulletGlyph = "\u25aa "
 				bulletColor = ui.ColorTextMuted
 			}
 

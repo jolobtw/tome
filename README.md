@@ -67,10 +67,11 @@ sudo mv tome /usr/local/bin/
 tome
 ```
 
-**Option 2: Install with Go**
+**Option 2: Install or Update with Go**
 ```bash
 go install github.com/jolobtw/tome/cmd/tome@latest
 ```
+*(Ensure `~/go/bin` is in your `PATH` or move `~/go/bin/tome` to `/usr/local/bin`).*
 
 ### 📂 Choosing Your Notes Folder
 

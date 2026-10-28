@@ -23,7 +23,7 @@ import (
 	"github.com/jolobtw/tome/internal/ui"
 )
 
-const AppVersion = "v1.0.6"
+const AppVersion = "v1.0.7"
 
 type ContextLine struct {
 	LineNum int
@@ -51,9 +51,10 @@ type Model struct {
 	workspaceName  string
 	isObsidian     bool
 	allNodes       []notes.Node
-	visibleIndices []int
-	selectedIdx    int
-	viewport       viewport.Model
+	visibleIndices   []int
+	selectedIdx      int
+	treeScrollOffset int
+	viewport         viewport.Model
 
 	// In-place Note Editor
 	inEditMode     bool
@@ -302,6 +303,9 @@ func (m *Model) rebuildVisible() {
 		if m.selectedIdx >= len(m.visibleIndices) {
 			m.selectedIdx = max(0, len(m.visibleIndices)-1)
 		}
+		if m.treeScrollOffset > m.selectedIdx {
+			m.treeScrollOffset = m.selectedIdx
+		}
 		return
 	}
 
@@ -369,6 +373,9 @@ func (m *Model) rebuildVisible() {
 	m.visibleIndices = visible
 	if m.selectedIdx >= len(m.visibleIndices) {
 		m.selectedIdx = max(0, len(m.visibleIndices)-1)
+	}
+	if m.treeScrollOffset > m.selectedIdx {
+		m.treeScrollOffset = m.selectedIdx
 	}
 }
 
@@ -812,19 +819,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activePane = 1 - m.activePane
 
 		case "home", "g":
-			m.viewport.GotoTop()
+			if m.activePane == 1 {
+				m.viewport.GotoTop()
+			} else {
+				m.selectedIdx = 0
+				m.treeScrollOffset = 0
+				m.updateViewportPreview()
+			}
 			return m, nil
 
 		case "end", "G":
-			m.viewport.GotoBottom()
+			if m.activePane == 1 {
+				m.viewport.GotoBottom()
+			} else {
+				m.selectedIdx = max(0, len(m.visibleIndices)-1)
+				m.updateViewportPreview()
+			}
 			return m, nil
 
 		case "pgup", "ctrl+u":
-			m.viewport.HalfViewUp()
+			if m.activePane == 1 {
+				m.viewport.HalfViewUp()
+			} else {
+				m.selectedIdx = max(0, m.selectedIdx-10)
+				m.updateViewportPreview()
+			}
 			return m, nil
 
 		case "pgdown", "ctrl+d":
-			m.viewport.HalfViewDown()
+			if m.activePane == 1 {
+				m.viewport.HalfViewDown()
+			} else {
+				m.selectedIdx = min(len(m.visibleIndices)-1, m.selectedIdx+10)
+				m.updateViewportPreview()
+			}
 			return m, nil
 
 		case "up", "k", "w":
@@ -1086,8 +1114,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.MouseWheelUp:
 			if msg.X < leftTotalWidth {
-				if m.selectedIdx > 0 {
-					m.selectedIdx--
+				headerHeight := 2
+				footerHeight := 1
+				panesHeight := max(4, m.height-headerHeight-footerHeight)
+				availH := panesHeight - 2
+				if m.filterActive {
+					availH -= 2
+				}
+				if availH < 1 {
+					availH = 1
+				}
+				m.treeScrollOffset = max(0, m.treeScrollOffset-3)
+				if m.selectedIdx > m.treeScrollOffset+availH-1 {
+					m.selectedIdx = m.treeScrollOffset + availH - 1
+					m.updateViewportPreview()
+				} else if m.selectedIdx < m.treeScrollOffset {
+					m.selectedIdx = m.treeScrollOffset
 					m.updateViewportPreview()
 				}
 			} else {
@@ -1096,8 +1138,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case tea.MouseWheelDown:
 			if msg.X < leftTotalWidth {
-				if m.selectedIdx < len(m.visibleIndices)-1 {
-					m.selectedIdx++
+				headerHeight := 2
+				footerHeight := 1
+				panesHeight := max(4, m.height-headerHeight-footerHeight)
+				availH := panesHeight - 2
+				if m.filterActive {
+					availH -= 2
+				}
+				if availH < 1 {
+					availH = 1
+				}
+				maxOffset := max(0, len(m.visibleIndices)-availH)
+				m.treeScrollOffset = min(maxOffset, m.treeScrollOffset+3)
+				if m.selectedIdx < m.treeScrollOffset {
+					m.selectedIdx = m.treeScrollOffset
+					m.updateViewportPreview()
+				} else if m.selectedIdx > m.treeScrollOffset+availH-1 {
+					m.selectedIdx = min(len(m.visibleIndices)-1, m.treeScrollOffset+availH-1)
 					m.updateViewportPreview()
 				}
 			} else {
@@ -1114,7 +1171,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.filterActive {
 				offset = 5
 			}
-			clickedRow := msg.Y - offset
+			clickedRow := m.treeScrollOffset + (msg.Y - offset)
 			if clickedRow >= 0 && clickedRow < len(m.visibleIndices) {
 				now := time.Now()
 				if now.Sub(m.lastClickTime) < 200*time.Millisecond {
@@ -1150,7 +1207,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
+	headerHeight := 2
+	footerHeight := 1
+	panesHeight := max(4, m.height-headerHeight-footerHeight)
+	availTreeH := panesHeight - 2
+	if m.filterActive {
+		availTreeH -= 2
+	}
+	m.syncTreeScrollOffset(availTreeH)
+
 	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) syncTreeScrollOffset(availHeight int) {
+	if availHeight < 1 {
+		availHeight = 1
+	}
+	if m.selectedIdx < m.treeScrollOffset {
+		m.treeScrollOffset = m.selectedIdx
+	}
+	if m.selectedIdx >= m.treeScrollOffset+availHeight {
+		m.treeScrollOffset = m.selectedIdx - availHeight + 1
+	}
+	if m.treeScrollOffset < 0 {
+		m.treeScrollOffset = 0
+	}
+	maxOffset := max(0, len(m.visibleIndices)-availHeight)
+	if m.treeScrollOffset > maxOffset {
+		m.treeScrollOffset = maxOffset
+	}
 }
 
 func (m *Model) recalculateViewport() {
@@ -1341,10 +1426,32 @@ func (m Model) View() string {
 		treeLines = append(treeLines, ui.SubtitleStyle.Render("  No notes match filter"))
 	}
 
-	for i, visID := range m.visibleIndices {
-		if len(treeLines) >= panesContentHeight {
-			break
-		}
+	availTreeHeight := panesContentHeight
+	if m.filterActive {
+		availTreeHeight -= 2
+	}
+	if availTreeHeight < 1 {
+		availTreeHeight = 1
+	}
+
+	scrollOffset := m.treeScrollOffset
+	if m.selectedIdx < scrollOffset {
+		scrollOffset = m.selectedIdx
+	}
+	if m.selectedIdx >= scrollOffset+availTreeHeight {
+		scrollOffset = m.selectedIdx - availTreeHeight + 1
+	}
+	if scrollOffset < 0 {
+		scrollOffset = 0
+	}
+	maxOffset := max(0, len(m.visibleIndices)-availTreeHeight)
+	if scrollOffset > maxOffset {
+		scrollOffset = maxOffset
+	}
+
+	endIdx := min(len(m.visibleIndices), scrollOffset+availTreeHeight)
+	for i := scrollOffset; i < endIdx; i++ {
+		visID := m.visibleIndices[i]
 
 		var item *notes.Node
 		for idx := range m.allNodes {
