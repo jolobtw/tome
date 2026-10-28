@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +22,8 @@ import (
 	"github.com/jolobtw/tome/internal/notes"
 	"github.com/jolobtw/tome/internal/ui"
 )
+
+const AppVersion = "v1.0.3"
 
 type ContextLine struct {
 	LineNum int
@@ -103,6 +108,10 @@ type Model struct {
 	cheatHeight    int
 	cheatTargetH   int
 
+	// Version & GitHub Update Indicator
+	latestVersion string
+	hasUpdate     bool
+
 	statusMsg string
 }
 
@@ -142,15 +151,19 @@ func initialModel() Model {
 	cfg := notes.LoadConfig()
 	workspacePath := cfg.ActiveNotebook
 
-	// Allow passing a folder path via command-line argument: e.g. `tome ~/Documents/Notes` or `tome .`
+	// Handle CLI arguments: --version or folder path
 	if len(os.Args) > 1 {
-		argPath := os.Args[1]
-		if argPath != "" && argPath != "-h" && argPath != "--help" {
-			if strings.HasPrefix(argPath, "~") {
+		arg := os.Args[1]
+		if arg == "-v" || arg == "--version" || arg == "version" {
+			fmt.Printf("Tome %s (The Arcane Terminal Notebook)\n", AppVersion)
+			os.Exit(0)
+		}
+		if arg != "" && arg != "-h" && arg != "--help" {
+			if strings.HasPrefix(arg, "~") {
 				home, _ := os.UserHomeDir()
-				argPath = filepath.Join(home, strings.TrimPrefix(argPath, "~"))
+				arg = filepath.Join(home, strings.TrimPrefix(arg, "~"))
 			}
-			absPath, err := filepath.Abs(argPath)
+			absPath, err := filepath.Abs(arg)
 			if err == nil {
 				// Create directory if it does not exist yet
 				_ = os.MkdirAll(absPath, 0755)
@@ -359,13 +372,20 @@ func (m *Model) rebuildVisible() {
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return checkGitHubUpdateCmd
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case versionCheckMsg:
+		if msg.err == nil && msg.hasUpdate {
+			m.latestVersion = msg.latestVersion
+			m.hasUpdate = true
+		}
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -1291,10 +1311,26 @@ func (m Model) View() string {
 		vaultBadge = ui.BadgeStyle.Render("󰈙 Local Vault")
 	}
 
-	bannerRight := fmt.Sprintf("%s %s", wsBadge, vaultBadge)
+	var verBadge string
+	if m.hasUpdate {
+		verBadge = lipgloss.NewStyle().
+			Foreground(ui.ColorGoldGlow).
+			Background(lipgloss.Color("#4D1A00")).
+			Bold(true).
+			Padding(0, 1).
+			Render(fmt.Sprintf("⇡ %s (New: %s)", AppVersion, m.latestVersion))
+	} else {
+		verBadge = ui.BadgeStyle.Render(AppVersion)
+	}
+
+	bannerRight := fmt.Sprintf("%s %s %s", wsBadge, vaultBadge, verBadge)
 
 	leftLen := lipgloss.Width(bannerLeft)
 	rightLen := lipgloss.Width(bannerRight)
+	if leftLen+rightLen+2 > usableWidth {
+		bannerLeft = fmt.Sprintf("✦ %s", titleGradient)
+		leftLen = lipgloss.Width(bannerLeft)
+	}
 	gap := max(1, usableWidth-leftLen-rightLen-2)
 	row1 := " " + bannerLeft + strings.Repeat(" ", gap) + bannerRight
 	row2 := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(strings.Repeat("─", usableWidth))
@@ -2710,4 +2746,70 @@ func renderCheatSheetContent(innerWidth int) string {
 	}
 
 	return sb.String()
+}
+
+type versionCheckMsg struct {
+	latestVersion string
+	hasUpdate     bool
+	err           error
+}
+
+func checkGitHubUpdateCmd() tea.Msg {
+	client := &http.Client{Timeout: 3 * time.Second}
+	req, err := http.NewRequest("GET", "https://api.github.com/repos/jolobtw/tome/releases/latest", nil)
+	if err != nil {
+		return versionCheckMsg{err: err}
+	}
+	req.Header.Set("User-Agent", "tome-app")
+	resp, err := client.Do(req)
+	if err != nil {
+		return versionCheckMsg{err: err}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return versionCheckMsg{err: fmt.Errorf("status: %d", resp.StatusCode)}
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return versionCheckMsg{err: err}
+	}
+
+	latest := strings.TrimSpace(release.TagName)
+	hasUpdate := isNewerVersion(AppVersion, latest)
+	return versionCheckMsg{latestVersion: latest, hasUpdate: hasUpdate}
+}
+
+func parseVersion(v string) []int {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	parts := strings.Split(v, ".")
+	var res []int
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			break
+		}
+		res = append(res, n)
+	}
+	for len(res) < 3 {
+		res = append(res, 0)
+	}
+	return res
+}
+
+func isNewerVersion(current, latest string) bool {
+	c := parseVersion(current)
+	l := parseVersion(latest)
+	for i := 0; i < 3; i++ {
+		if l[i] > c[i] {
+			return true
+		}
+		if l[i] < c[i] {
+			return false
+		}
+	}
+	return false
 }

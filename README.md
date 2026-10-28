@@ -99,3 +99,16 @@ go build -o tome.exe ./cmd/tome
 # Run
 .\tome.exe
 ```
+
+---
+
+### 🏷️ Versioning & Update Detection
+
+- **Check Version via CLI:**
+  ```bash
+  tome --version
+  # or: tome -v
+  ```
+- **In-App Version Indicator:** Tome subtly displays your current version (e.g. `v1.0.3`) in the top-right header banner.
+- **Non-Blocking Update Alerts:** On launch, Tome asynchronously checks GitHub Releases in the background. If a newer release is published, the version indicator automatically lights up as an amber update pill (`⇡ v1.0.2 (New: v1.0.3)`), letting you know an update is available without interrupting your session.
+
