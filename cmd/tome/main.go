@@ -23,7 +23,7 @@ import (
 	"github.com/jolobtw/tome/internal/ui"
 )
 
-const AppVersion = "v1.0.3"
+const AppVersion = "v1.0.4"
 
 type ContextLine struct {
 	LineNum int
@@ -1293,8 +1293,10 @@ func (m Model) View() string {
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
 	// 1. Header Banner
-	titleGradient := ui.Gradient("❖  T O M E", "#FF4500", "#FFD166")
-	bannerLeft := fmt.Sprintf("✦ %s ❖ %s", titleGradient, ui.SubtitleStyle.Render("The Arcane Terminal Notebook"))
+	starGlyph := lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Bold(true).Render("✦")
+	sepGlyph := lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Render("❖")
+	titleGradient := ui.Gradient("❖ TOME", "#FF4500", "#FFD166")
+	bannerLeft := fmt.Sprintf("%s %s %s %s", starGlyph, titleGradient, sepGlyph, ui.SubtitleStyle.Render("The Arcane Terminal Notebook"))
 
 	// Friendly workspace path display
 	friendlyPath := m.workspacePath
@@ -1328,7 +1330,7 @@ func (m Model) View() string {
 	leftLen := lipgloss.Width(bannerLeft)
 	rightLen := lipgloss.Width(bannerRight)
 	if leftLen+rightLen+2 > usableWidth {
-		bannerLeft = fmt.Sprintf("✦ %s", titleGradient)
+		bannerLeft = fmt.Sprintf("%s %s", starGlyph, titleGradient)
 		leftLen = lipgloss.Width(bannerLeft)
 	}
 	gap := max(1, usableWidth-leftLen-rightLen-2)

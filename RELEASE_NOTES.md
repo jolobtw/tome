@@ -1,5 +1,14 @@
 # Tome Release Notes
 
+## Version 1.0.4
+**Date:** 2026-10-28
+
+### Header Aesthetics & Spacing Polish
+- **Tightened Title Typography:** Removed loose letter-spacing and redundant gaps, rendering the title cleanly as `❖ TOME`.
+- **Dedicated Glyph Coloring:** The leading arcane star `✦` is now explicitly highlighted in Flame Orange (`#FF7A00`), and the separator diamond `❖` is rendered in Muted Slate (`#6C7086`), ensuring harmonious visual balance with other styled terminal apps.
+
+---
+
 ## Version 1.0.3
 **Date:** 2026-10-27
 
