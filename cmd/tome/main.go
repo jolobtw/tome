@@ -23,7 +23,7 @@ import (
 	"github.com/jolobtw/tome/internal/ui"
 )
 
-const AppVersion = "v1.0.7"
+const AppVersion = "v1.0.8"
 
 type ContextLine struct {
 	LineNum int
@@ -1115,7 +1115,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseWheelUp:
 			if msg.X < leftTotalWidth {
 				headerHeight := 2
-				footerHeight := 1
+				usableW := max(20, m.width-2)
+				footerHeight := m.getFooterHeight(usableW)
 				panesHeight := max(4, m.height-headerHeight-footerHeight)
 				availH := panesHeight - 2
 				if m.filterActive {
@@ -1139,7 +1140,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseWheelDown:
 			if msg.X < leftTotalWidth {
 				headerHeight := 2
-				footerHeight := 1
+				usableW := max(20, m.width-2)
+				footerHeight := m.getFooterHeight(usableW)
 				panesHeight := max(4, m.height-headerHeight-footerHeight)
 				availH := panesHeight - 2
 				if m.filterActive {
@@ -1208,7 +1210,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	headerHeight := 2
-	footerHeight := 1
+	usableW := max(20, m.width-2)
+	footerHeight := m.getFooterHeight(usableW)
 	panesHeight := max(4, m.height-headerHeight-footerHeight)
 	availTreeH := panesHeight - 2
 	if m.filterActive {
@@ -1217,6 +1220,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.syncTreeScrollOffset(availTreeH)
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) getFooterHeight(usableWidth int) int {
+	if m.modalType != "" || m.searchOpen || m.filterActive || m.inEditMode || m.aiOpen || m.cheatSheetOpen {
+		return 1
+	}
+	if m.activePane == 0 {
+		if usableWidth < 170 {
+			if usableWidth < 85 {
+				return 3
+			}
+			return 2
+		}
+		return 1
+	}
+	if usableWidth < 105 {
+		return 2
+	}
+	return 1
+}
+
+func wrapFooterItems(items []string, usableWidth int) string {
+	var lines []string
+	var currentLine string
+	currentWidth := 0
+
+	for _, item := range items {
+		itemWidth := lipgloss.Width(item)
+		if currentWidth > 0 && currentWidth+itemWidth > usableWidth {
+			lines = append(lines, currentLine)
+			currentLine = " " + strings.TrimLeft(item, " ")
+			currentWidth = lipgloss.Width(currentLine)
+		} else {
+			if currentWidth == 0 {
+				currentLine = " " + strings.TrimLeft(item, " ")
+			} else {
+				currentLine += item
+			}
+			currentWidth = lipgloss.Width(currentLine)
+		}
+	}
+	if currentLine != "" {
+		lines = append(lines, currentLine)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) syncTreeScrollOffset(availHeight int) {
@@ -1244,10 +1292,9 @@ func (m *Model) recalculateViewport() {
 	}
 
 	headerHeight := 2
-	footerHeight := 1
-	panesHeight := max(4, m.height-headerHeight-footerHeight)
-
 	usableWidth := max(20, m.width-2)
+	footerHeight := m.getFooterHeight(usableWidth)
+	panesHeight := max(4, m.height-headerHeight-footerHeight)
 	leftTotalWidth := max(34, min(52, usableWidth*36/100))
 	rightTotalWidth := max(16, usableWidth-leftTotalWidth)
 
@@ -1371,7 +1418,7 @@ func (m Model) View() string {
 
 	usableWidth := max(20, m.width-2)
 	headerHeight := 2
-	footerHeight := 1
+	footerHeight := m.getFooterHeight(usableWidth)
 	panesHeight := max(4, m.height-headerHeight-footerHeight)
 	panesContentHeight := panesHeight - 2
 	isOverlayOpen := m.modalType != "" || m.searchOpen || m.aiOpen || m.cheatSheetOpen
@@ -1623,34 +1670,43 @@ func (m Model) View() string {
 		footer = " ✦ Formatting Guide │ " + kClose + kQuit
 	} else {
 		if m.activePane == 1 {
-			kNav := ui.FooterKeyStyle.Render("[W/S/Wheel]") + ui.FooterDescStyle.Render(" Scroll  ")
-			kSearch := ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  ")
-			kTab := ui.FooterKeyStyle.Render("[Tab/A]") + ui.FooterDescStyle.Render(" Tree Pane  ")
-			kEdit := ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  ")
-			kCheat := ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide  ")
-			kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
-			kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
-			footer = " 📄 Preview │ " + kNav + kSearch + kTab + kEdit + kCheat + kAi + kQuit
+			previewItems := []string{
+				ui.FooterKeyStyle.Render("[W/S/Wheel]") + ui.FooterDescStyle.Render(" Scroll  "),
+				ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  "),
+				ui.FooterKeyStyle.Render("[Tab/A]") + ui.FooterDescStyle.Render(" Tree Pane  "),
+				ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  "),
+				ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide  "),
+				ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  "),
+				ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit"),
+			}
+			footer = wrapFooterItems(previewItems, usableWidth)
 		} else {
-			kNav := ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  ")
-			kFilter := ui.FooterKeyStyle.Render("[/]") + ui.FooterDescStyle.Render(" Filter  ")
-			kSearch := ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  ")
-			kExp := ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  ")
-			kEdit := ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  ")
-			kNew := ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New  ")
-			kFolder := ui.FooterKeyStyle.Render("[F]") + ui.FooterDescStyle.Render(" Folder  ")
-			kRename := ui.FooterKeyStyle.Render("[R]") + ui.FooterDescStyle.Render(" Rename  ")
-			kMove := ui.FooterKeyStyle.Render("[M]") + ui.FooterDescStyle.Render(" Move  ")
-			kDelete := ui.FooterKeyStyle.Render("[X]") + ui.FooterDescStyle.Render(" Del  ")
-			kLog := ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  ")
-			kAi := ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  ")
-			kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
-			footer = " " + kNav + kFilter + kSearch + kExp + kEdit + kNew + kFolder + kRename + kMove + kDelete + kLog + kAi + kQuit
+			treeItems := []string{
+				ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  "),
+				ui.FooterKeyStyle.Render("[/]") + ui.FooterDescStyle.Render(" Filter  "),
+				ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  "),
+				ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  "),
+				ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  "),
+				ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New  "),
+				ui.FooterKeyStyle.Render("[F]") + ui.FooterDescStyle.Render(" Folder  "),
+				ui.FooterKeyStyle.Render("[R]") + ui.FooterDescStyle.Render(" Rename  "),
+				ui.FooterKeyStyle.Render("[M]") + ui.FooterDescStyle.Render(" Move  "),
+				ui.FooterKeyStyle.Render("[X]") + ui.FooterDescStyle.Render(" Del  "),
+				ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  "),
+				ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  "),
+				ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit"),
+			}
+			footer = wrapFooterItems(treeItems, usableWidth)
 		}
 	}
-	if lipgloss.Width(footer) > usableWidth {
-		footer = footer[:usableWidth]
+	footerLines := strings.Split(footer, "\n")
+	for len(footerLines) < footerHeight {
+		footerLines = append(footerLines, "")
 	}
+	if len(footerLines) > footerHeight {
+		footerLines = footerLines[:footerHeight]
+	}
+	footer = strings.Join(footerLines, "\n")
 
 	// 6. Base Full-Screen Background
 	fullScreen := lipgloss.JoinVertical(lipgloss.Left, headerBlock, panesView, footer)
@@ -1658,7 +1714,7 @@ func (m Model) View() string {
 
 	// Apply Backdrop Scrim Dimming if an overlay (modal dialog or sliding drawer) is active
 	if isOverlayOpen && len(bgLines) > 0 {
-		dimEnd := len(bgLines) - 1 // keep the modal/drawer action footer bright
+		dimEnd := max(0, len(bgLines)-footerHeight) // keep the modal/drawer action footer bright
 		for i := 0; i < dimEnd; i++ {
 			bgLines[i] = ui.DimANSILine(bgLines[i], 0.35)
 		}

@@ -1,5 +1,15 @@
 # Tome Release Notes
 
+## Version 1.0.8
+**Date:** 2026-10-28
+
+### Adaptive Multi-Line Footer Wrapping
+- **Dynamic Keybind Wrapping:** Fixed an issue where running Tome on narrower terminal windows (such as Windows Terminal at standard width) truncated bottom bar keybind references. Keybinds now automatically wrap cleanly across multiple lines.
+- **Dynamic Viewport Height Budgeting:** Automatically budgets 1 or 2 lines for the footer based on window width so the content panes scale smoothly without any vertical jitter, clipping, or scrolling.
+- **Backdrop Dimming Compatibility:** Backdrop scrim dimming now cleanly excludes all footer lines when dialogs or drawers are active.
+
+---
+
 ## Version 1.0.7
 **Date:** 2026-10-28
 
