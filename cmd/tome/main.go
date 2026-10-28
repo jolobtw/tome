@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jolobtw/tome/internal/markdown"
 	"github.com/jolobtw/tome/internal/notes"
@@ -1378,7 +1379,7 @@ func (m Model) View() string {
 		leftStyle = ui.ActivePaneStyle
 	}
 	leftView := leftStyle.
-		Width(leftTotalWidth - 4).
+		Width(leftTotalWidth - 2).
 		Height(panesContentHeight).
 		Render(strings.Join(treeLines, "\n"))
 
@@ -1422,7 +1423,7 @@ func (m Model) View() string {
 	}
 
 	rightView := rightStyle.
-		Width(rightTotalWidth - 4).
+		Width(rightTotalWidth - 2).
 		Height(panesContentHeight).
 		Render(rightContent)
 
@@ -1922,6 +1923,9 @@ func (m Model) View() string {
 
 		var paddedLines []string
 		for _, l := range flatLines {
+			if lipgloss.Width(l) > innerModalWidth {
+				l = ansi.Truncate(l, innerModalWidth, "")
+			}
 			paddedLines = append(paddedLines, padRightWithBg(l, innerModalWidth, modalBg))
 		}
 		modalContent := strings.Join(paddedLines, "\n")
@@ -1933,26 +1937,29 @@ func (m Model) View() string {
 			Background(modalBg).
 			Padding(1, 2)
 
-		modalRendered := modalBoxStyle.Width(innerModalWidth).Render(modalContent)
+		modalRendered := modalBoxStyle.Width(modalWidth - 2).Render(modalContent)
 		modalLines := strings.Split(modalRendered, "\n")
 		modalHeight := len(modalLines)
 		startRow := max(2, (m.height-modalHeight)/2)
 
 		mWidth := lipgloss.Width(modalLines[0])
-		leftPad := max(1, (usableWidth-mWidth)/2)
-		rightPad := max(1, usableWidth-leftPad-mWidth)
-
-		borderChar := ui.PaneStyle.GetBorderStyle().Left
-		leftBorder := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(borderChar)
-		rightBorder := lipgloss.NewStyle().Foreground(ui.ColorBorderMuted).Render(borderChar)
-
-		leftSpace := strings.Repeat(" ", max(0, leftPad-1))
-		rightSpace := strings.Repeat(" ", max(0, rightPad-1))
+		startCol := max(0, (usableWidth-mWidth)/2)
 
 		for rIdx, mLine := range modalLines {
 			targetRow := startRow + rIdx
 			if targetRow >= 0 && targetRow < len(bgLines)-1 {
-				bgLines[targetRow] = leftBorder + leftSpace + mLine + rightSpace + rightBorder
+				bg := bgLines[targetRow]
+				bgW := ansi.StringWidth(bg)
+				if bgW < usableWidth {
+					bg = bg + strings.Repeat(" ", usableWidth-bgW)
+				}
+				leftPart := ansi.Truncate(bg, startCol, "")
+				leftPartW := ansi.StringWidth(leftPart)
+				if leftPartW < startCol {
+					leftPart = leftPart + strings.Repeat(" ", startCol-leftPartW)
+				}
+				rightPart := ansi.TruncateLeft(bg, startCol+mWidth, "")
+				bgLines[targetRow] = leftPart + mLine + rightPart
 			}
 		}
 	}
