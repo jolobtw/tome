@@ -3,11 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +24,7 @@ import (
 	"github.com/jolobtw/tome/internal/ui"
 )
 
-const AppVersion = "v1.0.9"
+const AppVersion = "v1.0.10"
 
 type ContextLine struct {
 	LineNum int
@@ -115,7 +113,6 @@ type Model struct {
 	// Version & GitHub Update Indicator
 	latestVersion string
 	hasUpdate     bool
-	updateStatus  string
 
 	statusMsg string
 }
@@ -267,14 +264,6 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 		termH = 30
 	}
 
-	// Clean up any old update backup binaries from previous runs
-	if runtime.GOOS == "windows" {
-		if execPath, err := os.Executable(); err == nil {
-			_ = os.Remove(execPath + ".old")
-			_ = os.Remove(execPath + ".tmp")
-		}
-	}
-
 	m := Model{
 		config:        cfg,
 		workspacePath: workspacePath,
@@ -286,7 +275,6 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 		width:         termW,
 		height:        termH,
 		ready:         true,
-		updateStatus:  "checking",
 		editor:        ta,
 		filterInput:   fi,
 		searchInput:   si,
@@ -418,22 +406,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil && msg.hasUpdate {
 			m.latestVersion = msg.latestVersion
 			m.hasUpdate = true
-			if msg.downloadURL != "" {
-				m.updateStatus = "updating"
-				return m, downloadAndApplyUpdateCmd(msg.downloadURL, msg.latestVersion)
-			}
-			m.updateStatus = "available"
-			return m, nil
-		}
-		m.updateStatus = "idle"
-		return m, nil
-
-	case updateResultMsg:
-		if msg.err == nil {
-			m.updateStatus = "updated"
-			m.latestVersion = msg.version
-		} else {
-			m.updateStatus = "available"
 		}
 		return m, nil
 
@@ -1509,45 +1481,15 @@ func (m Model) View() string {
 	}
 
 	var verBadge string
-	switch m.updateStatus {
-	case "checking":
-		verBadge = lipgloss.NewStyle().
-			Foreground(ui.ColorAmberGold).
-			Background(ui.ColorSelectBg).
-			Padding(0, 1).
-			Render("✦ Loading...")
-	case "updating":
-		verBadge = lipgloss.NewStyle().
-			Foreground(ui.ColorGoldGlow).
-			Background(lipgloss.Color("#4D1A00")).
-			Bold(true).
-			Padding(0, 1).
-			Render(fmt.Sprintf("⟳ Updating to %s...", m.latestVersion))
-	case "updated":
-		verBadge = lipgloss.NewStyle().
-			Foreground(ui.ColorGreen).
-			Background(lipgloss.Color("#1B3320")).
-			Bold(true).
-			Padding(0, 1).
-			Render(fmt.Sprintf("✓ Updated to %s (restart to apply)", m.latestVersion))
-	case "available":
+	if m.hasUpdate {
 		verBadge = lipgloss.NewStyle().
 			Foreground(ui.ColorGoldGlow).
 			Background(lipgloss.Color("#4D1A00")).
 			Bold(true).
 			Padding(0, 1).
 			Render(fmt.Sprintf("⇡ %s (New: %s)", AppVersion, m.latestVersion))
-	default:
-		if m.hasUpdate {
-			verBadge = lipgloss.NewStyle().
-				Foreground(ui.ColorGoldGlow).
-				Background(lipgloss.Color("#4D1A00")).
-				Bold(true).
-				Padding(0, 1).
-				Render(fmt.Sprintf("⇡ %s (New: %s)", AppVersion, m.latestVersion))
-		} else {
-			verBadge = ui.BadgeStyle.Render(AppVersion)
-		}
+	} else {
+		verBadge = ui.BadgeStyle.Render(AppVersion)
 	}
 
 	row1, row2 := ui.FormatHeader("TOME", "The Arcane Terminal Notebook", []string{wsBadge, vaultBadge, verBadge}, usableWidth)
@@ -2981,17 +2923,11 @@ func renderCheatSheetContent(innerWidth int) string {
 type versionCheckMsg struct {
 	latestVersion string
 	hasUpdate     bool
-	downloadURL   string
 	err           error
 }
 
-type updateResultMsg struct {
-	version string
-	err     error
-}
-
 func checkGitHubUpdateCmd() tea.Msg {
-	client := &http.Client{Timeout: 4 * time.Second}
+	client := &http.Client{Timeout: 3 * time.Second}
 	req, err := http.NewRequest("GET", "https://api.github.com/repos/jolobtw/tome/releases/latest", nil)
 	if err != nil {
 		return versionCheckMsg{err: err}
@@ -3009,10 +2945,6 @@ func checkGitHubUpdateCmd() tea.Msg {
 
 	var release struct {
 		TagName string `json:"tag_name"`
-		Assets  []struct {
-			Name               string `json:"name"`
-			BrowserDownloadURL string `json:"browser_download_url"`
-		} `json:"assets"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return versionCheckMsg{err: err}
@@ -3020,95 +2952,7 @@ func checkGitHubUpdateCmd() tea.Msg {
 
 	latest := strings.TrimSpace(release.TagName)
 	hasUpdate := isNewerVersion(AppVersion, latest)
-	var downloadURL string
-
-	if hasUpdate {
-		var targetAsset string
-		if runtime.GOOS == "windows" {
-			targetAsset = fmt.Sprintf("tome-windows-%s.exe", runtime.GOARCH)
-		} else {
-			targetAsset = fmt.Sprintf("tome-%s-%s", runtime.GOOS, runtime.GOARCH)
-		}
-		for _, a := range release.Assets {
-			if strings.EqualFold(a.Name, targetAsset) {
-				downloadURL = a.BrowserDownloadURL
-				break
-			}
-		}
-	}
-
-	return versionCheckMsg{
-		latestVersion: latest,
-		hasUpdate:     hasUpdate,
-		downloadURL:   downloadURL,
-	}
-}
-
-func downloadAndApplyUpdateCmd(downloadURL, version string) tea.Cmd {
-	return func() tea.Msg {
-		if downloadURL == "" {
-			return updateResultMsg{version: version, err: fmt.Errorf("no asset matching platform")}
-		}
-
-		client := &http.Client{Timeout: 30 * time.Second}
-		req, err := http.NewRequest("GET", downloadURL, nil)
-		if err != nil {
-			return updateResultMsg{version: version, err: err}
-		}
-		req.Header.Set("User-Agent", "tome-app")
-		resp, err := client.Do(req)
-		if err != nil {
-			return updateResultMsg{version: version, err: err}
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return updateResultMsg{version: version, err: fmt.Errorf("download status: %d", resp.StatusCode)}
-		}
-
-		binData, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return updateResultMsg{version: version, err: err}
-		}
-
-		execPath, err := os.Executable()
-		if err != nil {
-			return updateResultMsg{version: version, err: err}
-		}
-		execPath, err = filepath.EvalSymlinks(execPath)
-		if err != nil {
-			return updateResultMsg{version: version, err: err}
-		}
-
-		tmpPath := execPath + ".tmp"
-		if err := os.WriteFile(tmpPath, binData, 0755); err != nil {
-			return updateResultMsg{version: version, err: err}
-		}
-
-		if runtime.GOOS == "windows" {
-			oldPath := execPath + ".old"
-			_ = os.Remove(oldPath) // remove previous backup if exists
-			if err := os.Rename(execPath, oldPath); err != nil {
-				_ = os.Remove(tmpPath)
-				return updateResultMsg{version: version, err: err}
-			}
-			if err := os.Rename(tmpPath, execPath); err != nil {
-				_ = os.Rename(oldPath, execPath) // restore
-				return updateResultMsg{version: version, err: err}
-			}
-		} else {
-			if err := os.Chmod(tmpPath, 0755); err != nil {
-				_ = os.Remove(tmpPath)
-				return updateResultMsg{version: version, err: err}
-			}
-			if err := os.Rename(tmpPath, execPath); err != nil {
-				_ = os.Remove(tmpPath)
-				return updateResultMsg{version: version, err: err}
-			}
-		}
-
-		return updateResultMsg{version: version, err: nil}
-	}
+	return versionCheckMsg{latestVersion: latest, hasUpdate: hasUpdate}
 }
 
 func parseVersion(v string) []int {
