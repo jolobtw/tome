@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -17,13 +19,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	term "github.com/charmbracelet/x/term"
 
 	"github.com/jolobtw/tome/internal/markdown"
 	"github.com/jolobtw/tome/internal/notes"
 	"github.com/jolobtw/tome/internal/ui"
 )
 
-const AppVersion = "v1.0.8"
+const AppVersion = "v1.0.9"
 
 type ContextLine struct {
 	LineNum int
@@ -112,6 +115,7 @@ type Model struct {
 	// Version & GitHub Update Indicator
 	latestVersion string
 	hasUpdate     bool
+	updateStatus  string
 
 	statusMsg string
 }
@@ -253,6 +257,24 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 	si.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
 	si.CharLimit = 80
 
+	// Detect terminal dimensions immediately so Tome launches instantly without hanging
+	termW, termH, err := term.GetSize(os.Stdout.Fd())
+	if err != nil || termW <= 0 || termH <= 0 {
+		termW, termH, err = term.GetSize(os.Stdin.Fd())
+	}
+	if err != nil || termW <= 0 || termH <= 0 {
+		termW = 100
+		termH = 30
+	}
+
+	// Clean up any old update backup binaries from previous runs
+	if runtime.GOOS == "windows" {
+		if execPath, err := os.Executable(); err == nil {
+			_ = os.Remove(execPath + ".old")
+			_ = os.Remove(execPath + ".tmp")
+		}
+	}
+
 	m := Model{
 		config:        cfg,
 		workspacePath: workspacePath,
@@ -261,6 +283,10 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 		allNodes:      allNodes,
 		selectedIdx:   0,
 		activePane:    0,
+		width:         termW,
+		height:        termH,
+		ready:         true,
+		updateStatus:  "checking",
 		editor:        ta,
 		filterInput:   fi,
 		searchInput:   si,
@@ -281,6 +307,7 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 		}
 	}
 
+	m.recalculateViewport()
 	return m
 }
 
@@ -391,6 +418,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil && msg.hasUpdate {
 			m.latestVersion = msg.latestVersion
 			m.hasUpdate = true
+			if msg.downloadURL != "" {
+				m.updateStatus = "updating"
+				return m, downloadAndApplyUpdateCmd(msg.downloadURL, msg.latestVersion)
+			}
+			m.updateStatus = "available"
+			return m, nil
+		}
+		m.updateStatus = "idle"
+		return m, nil
+
+	case updateResultMsg:
+		if msg.err == nil {
+			m.updateStatus = "updated"
+			m.latestVersion = msg.version
+		} else {
+			m.updateStatus = "available"
 		}
 		return m, nil
 
@@ -1219,26 +1262,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	m.syncTreeScrollOffset(availTreeH)
 
+	targetVpH := max(2, panesHeight-2)
+	if m.viewport.Height != targetVpH && targetVpH > 0 {
+		m.viewport.Height = targetVpH
+	}
+
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) getFooterItems() []string {
+	if m.activePane == 1 {
+		return []string{
+			ui.FooterKeyStyle.Render("[W/S/Wheel]") + ui.FooterDescStyle.Render(" Scroll  "),
+			ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  "),
+			ui.FooterKeyStyle.Render("[Tab/A]") + ui.FooterDescStyle.Render(" Tree Pane  "),
+			ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  "),
+			ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide  "),
+			ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  "),
+			ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit"),
+		}
+	}
+	return []string{
+		ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  "),
+		ui.FooterKeyStyle.Render("[/]") + ui.FooterDescStyle.Render(" Filter  "),
+		ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  "),
+		ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  "),
+		ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  "),
+		ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New  "),
+		ui.FooterKeyStyle.Render("[F]") + ui.FooterDescStyle.Render(" Folder  "),
+		ui.FooterKeyStyle.Render("[R]") + ui.FooterDescStyle.Render(" Rename  "),
+		ui.FooterKeyStyle.Render("[M]") + ui.FooterDescStyle.Render(" Move  "),
+		ui.FooterKeyStyle.Render("[X]") + ui.FooterDescStyle.Render(" Del  "),
+		ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  "),
+		ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  "),
+		ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit"),
+	}
 }
 
 func (m Model) getFooterHeight(usableWidth int) int {
 	if m.modalType != "" || m.searchOpen || m.filterActive || m.inEditMode || m.aiOpen || m.cheatSheetOpen {
 		return 1
 	}
-	if m.activePane == 0 {
-		if usableWidth < 170 {
-			if usableWidth < 85 {
-				return 3
-			}
-			return 2
-		}
-		return 1
-	}
-	if usableWidth < 105 {
-		return 2
-	}
-	return 1
+	items := m.getFooterItems()
+	lines := strings.Split(wrapFooterItems(items, usableWidth), "\n")
+	return max(1, len(lines))
 }
 
 func wrapFooterItems(items []string, usableWidth int) string {
@@ -1442,15 +1509,45 @@ func (m Model) View() string {
 	}
 
 	var verBadge string
-	if m.hasUpdate {
+	switch m.updateStatus {
+	case "checking":
+		verBadge = lipgloss.NewStyle().
+			Foreground(ui.ColorAmberGold).
+			Background(ui.ColorSelectBg).
+			Padding(0, 1).
+			Render("✦ Loading...")
+	case "updating":
+		verBadge = lipgloss.NewStyle().
+			Foreground(ui.ColorGoldGlow).
+			Background(lipgloss.Color("#4D1A00")).
+			Bold(true).
+			Padding(0, 1).
+			Render(fmt.Sprintf("⟳ Updating to %s...", m.latestVersion))
+	case "updated":
+		verBadge = lipgloss.NewStyle().
+			Foreground(ui.ColorGreen).
+			Background(lipgloss.Color("#1B3320")).
+			Bold(true).
+			Padding(0, 1).
+			Render(fmt.Sprintf("✓ Updated to %s (restart to apply)", m.latestVersion))
+	case "available":
 		verBadge = lipgloss.NewStyle().
 			Foreground(ui.ColorGoldGlow).
 			Background(lipgloss.Color("#4D1A00")).
 			Bold(true).
 			Padding(0, 1).
 			Render(fmt.Sprintf("⇡ %s (New: %s)", AppVersion, m.latestVersion))
-	} else {
-		verBadge = ui.BadgeStyle.Render(AppVersion)
+	default:
+		if m.hasUpdate {
+			verBadge = lipgloss.NewStyle().
+				Foreground(ui.ColorGoldGlow).
+				Background(lipgloss.Color("#4D1A00")).
+				Bold(true).
+				Padding(0, 1).
+				Render(fmt.Sprintf("⇡ %s (New: %s)", AppVersion, m.latestVersion))
+		} else {
+			verBadge = ui.BadgeStyle.Render(AppVersion)
+		}
 	}
 
 	row1, row2 := ui.FormatHeader("TOME", "The Arcane Terminal Notebook", []string{wsBadge, vaultBadge, verBadge}, usableWidth)
@@ -1559,6 +1656,7 @@ func (m Model) View() string {
 	leftView := leftStyle.
 		Width(leftTotalWidth - 2).
 		Height(panesContentHeight).
+		MaxHeight(panesHeight).
 		Render(strings.Join(treeLines, "\n"))
 
 	// 3. Preview/Editor Pane (Right)
@@ -1603,6 +1701,7 @@ func (m Model) View() string {
 	rightView := rightStyle.
 		Width(rightTotalWidth - 2).
 		Height(panesContentHeight).
+		MaxHeight(panesHeight).
 		Render(rightContent)
 
 	// 4. Combine Full Background (Undisturbed!)
@@ -1669,35 +1768,7 @@ func (m Model) View() string {
 		kQuit := ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit")
 		footer = " ✦ Formatting Guide │ " + kClose + kQuit
 	} else {
-		if m.activePane == 1 {
-			previewItems := []string{
-				ui.FooterKeyStyle.Render("[W/S/Wheel]") + ui.FooterDescStyle.Render(" Scroll  "),
-				ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  "),
-				ui.FooterKeyStyle.Render("[Tab/A]") + ui.FooterDescStyle.Render(" Tree Pane  "),
-				ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  "),
-				ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide  "),
-				ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  "),
-				ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit"),
-			}
-			footer = wrapFooterItems(previewItems, usableWidth)
-		} else {
-			treeItems := []string{
-				ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  "),
-				ui.FooterKeyStyle.Render("[/]") + ui.FooterDescStyle.Render(" Filter  "),
-				ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  "),
-				ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  "),
-				ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  "),
-				ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New  "),
-				ui.FooterKeyStyle.Render("[F]") + ui.FooterDescStyle.Render(" Folder  "),
-				ui.FooterKeyStyle.Render("[R]") + ui.FooterDescStyle.Render(" Rename  "),
-				ui.FooterKeyStyle.Render("[M]") + ui.FooterDescStyle.Render(" Move  "),
-				ui.FooterKeyStyle.Render("[X]") + ui.FooterDescStyle.Render(" Del  "),
-				ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  "),
-				ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  "),
-				ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit"),
-			}
-			footer = wrapFooterItems(treeItems, usableWidth)
-		}
+		footer = wrapFooterItems(m.getFooterItems(), usableWidth)
 	}
 	footerLines := strings.Split(footer, "\n")
 	for len(footerLines) < footerHeight {
@@ -2910,11 +2981,17 @@ func renderCheatSheetContent(innerWidth int) string {
 type versionCheckMsg struct {
 	latestVersion string
 	hasUpdate     bool
+	downloadURL   string
 	err           error
 }
 
+type updateResultMsg struct {
+	version string
+	err     error
+}
+
 func checkGitHubUpdateCmd() tea.Msg {
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := &http.Client{Timeout: 4 * time.Second}
 	req, err := http.NewRequest("GET", "https://api.github.com/repos/jolobtw/tome/releases/latest", nil)
 	if err != nil {
 		return versionCheckMsg{err: err}
@@ -2932,6 +3009,10 @@ func checkGitHubUpdateCmd() tea.Msg {
 
 	var release struct {
 		TagName string `json:"tag_name"`
+		Assets  []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return versionCheckMsg{err: err}
@@ -2939,7 +3020,95 @@ func checkGitHubUpdateCmd() tea.Msg {
 
 	latest := strings.TrimSpace(release.TagName)
 	hasUpdate := isNewerVersion(AppVersion, latest)
-	return versionCheckMsg{latestVersion: latest, hasUpdate: hasUpdate}
+	var downloadURL string
+
+	if hasUpdate {
+		var targetAsset string
+		if runtime.GOOS == "windows" {
+			targetAsset = fmt.Sprintf("tome-windows-%s.exe", runtime.GOARCH)
+		} else {
+			targetAsset = fmt.Sprintf("tome-%s-%s", runtime.GOOS, runtime.GOARCH)
+		}
+		for _, a := range release.Assets {
+			if strings.EqualFold(a.Name, targetAsset) {
+				downloadURL = a.BrowserDownloadURL
+				break
+			}
+		}
+	}
+
+	return versionCheckMsg{
+		latestVersion: latest,
+		hasUpdate:     hasUpdate,
+		downloadURL:   downloadURL,
+	}
+}
+
+func downloadAndApplyUpdateCmd(downloadURL, version string) tea.Cmd {
+	return func() tea.Msg {
+		if downloadURL == "" {
+			return updateResultMsg{version: version, err: fmt.Errorf("no asset matching platform")}
+		}
+
+		client := &http.Client{Timeout: 30 * time.Second}
+		req, err := http.NewRequest("GET", downloadURL, nil)
+		if err != nil {
+			return updateResultMsg{version: version, err: err}
+		}
+		req.Header.Set("User-Agent", "tome-app")
+		resp, err := client.Do(req)
+		if err != nil {
+			return updateResultMsg{version: version, err: err}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return updateResultMsg{version: version, err: fmt.Errorf("download status: %d", resp.StatusCode)}
+		}
+
+		binData, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return updateResultMsg{version: version, err: err}
+		}
+
+		execPath, err := os.Executable()
+		if err != nil {
+			return updateResultMsg{version: version, err: err}
+		}
+		execPath, err = filepath.EvalSymlinks(execPath)
+		if err != nil {
+			return updateResultMsg{version: version, err: err}
+		}
+
+		tmpPath := execPath + ".tmp"
+		if err := os.WriteFile(tmpPath, binData, 0755); err != nil {
+			return updateResultMsg{version: version, err: err}
+		}
+
+		if runtime.GOOS == "windows" {
+			oldPath := execPath + ".old"
+			_ = os.Remove(oldPath) // remove previous backup if exists
+			if err := os.Rename(execPath, oldPath); err != nil {
+				_ = os.Remove(tmpPath)
+				return updateResultMsg{version: version, err: err}
+			}
+			if err := os.Rename(tmpPath, execPath); err != nil {
+				_ = os.Rename(oldPath, execPath) // restore
+				return updateResultMsg{version: version, err: err}
+			}
+		} else {
+			if err := os.Chmod(tmpPath, 0755); err != nil {
+				_ = os.Remove(tmpPath)
+				return updateResultMsg{version: version, err: err}
+			}
+			if err := os.Rename(tmpPath, execPath); err != nil {
+				_ = os.Remove(tmpPath)
+				return updateResultMsg{version: version, err: err}
+			}
+		}
+
+		return updateResultMsg{version: version, err: nil}
+	}
 }
 
 func parseVersion(v string) []int {
