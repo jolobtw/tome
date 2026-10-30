@@ -95,6 +95,11 @@ var (
 				Background(ColorSelectBg).
 				Bold(true)
 
+	// Tree Guide Lines:
+	// Connecting lines (│, ├─, └─) are a calm, consistent muted tone
+	TreeGuide = lipgloss.NewStyle().
+			Foreground(ColorTextMuted)
+
 	// AI Drawer
 	AIDrawerStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -233,6 +238,7 @@ func RefreshStyles() {
 	TreeNormalItem = lipgloss.NewStyle().Foreground(ColorTextRegular)
 	TreeCursor = lipgloss.NewStyle().Foreground(ColorFlameOrange).Bold(true)
 	TreeSelectedText = lipgloss.NewStyle().Foreground(ColorTextBright).Background(ColorSelectBg).Bold(true)
+	TreeGuide = lipgloss.NewStyle().Foreground(ColorTextMuted)
 	AIDrawerStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ColorAmberGold).Background(ColorDarkSlate).Padding(0, 1)
 	FooterKeyStyle = lipgloss.NewStyle().Foreground(ColorAmberGold).Bold(true)
 	FooterDescStyle = lipgloss.NewStyle().Foreground(ColorTextMuted)
@@ -274,6 +280,7 @@ func ApplyTheme(th ThemeFile) {
 	}
 	if th.Palette.TextMuted != "" {
 		ColorTextMuted = lipgloss.Color(th.Palette.TextMuted)
+		TreeGuide = lipgloss.NewStyle().Foreground(ColorTextMuted)
 	}
 	if th.Palette.StatusError != "" {
 		ColorCrimson = lipgloss.Color(th.Palette.StatusError)

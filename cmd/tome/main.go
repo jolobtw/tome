@@ -24,7 +24,7 @@ import (
 	"github.com/jolobtw/tome/internal/ui"
 )
 
-const AppVersion = "v1.0.10"
+const AppVersion = "v1.0.11"
 
 type ContextLine struct {
 	LineNum int
@@ -1559,35 +1559,45 @@ func (m Model) View() string {
 			}
 		}
 
-		var displayTitle string
+		var nodeDisplay string
+		var prefix string
 		if m.filterActive {
 			dir := filepath.Dir(item.RelPath)
 			if dir != "." && dir != "" {
-				displayTitle = fmt.Sprintf("%s%s (%s)", icon, item.Title, dir)
+				nodeDisplay = fmt.Sprintf("%s%s (%s)", icon, item.Title, dir)
 			} else {
-				displayTitle = icon + item.Title
+				nodeDisplay = icon + item.Title
 			}
 		} else {
-			displayTitle = item.Prefix + icon + item.Title
+			prefix = item.Prefix
+			nodeDisplay = icon + item.Title
 		}
 
-		rawTitle := truncateWithDots(displayTitle, availTitleWidth)
-		noBreakTitle := strings.ReplaceAll(rawTitle, " ", "\u00a0")
-		noBreakTitle = strings.ReplaceAll(noBreakTitle, "-", "\u2011")
+		prefixWidth := lipgloss.Width(prefix)
+		availBodyWidth := max(4, availTitleWidth-prefixWidth)
+		rawBody := truncateWithDots(nodeDisplay, availBodyWidth)
+		noBreakBody := strings.ReplaceAll(rawBody, " ", "\u00a0")
+		noBreakBody = strings.ReplaceAll(noBreakBody, "-", "\u2011")
+
+		var renderedPrefix string
+		if prefix != "" {
+			noBreakPrefix := strings.ReplaceAll(prefix, " ", "\u00a0")
+			renderedPrefix = ui.TreeGuide.Render(noBreakPrefix)
+		}
 
 		if i == m.selectedIdx {
 			cursor := ui.TreeCursor.Render("▌") + "\u00a0"
-			titlePill := ui.TreeSelectedText.Render(noBreakTitle)
-			treeLines = append(treeLines, cursor+titlePill)
+			titlePill := ui.TreeSelectedText.Render(noBreakBody)
+			treeLines = append(treeLines, cursor+renderedPrefix+titlePill)
 		} else {
 			indent := "\u00a0\u00a0"
 			var titleText string
 			if item.IsFolder {
-				titleText = ui.TreeNormalFolder.Render(noBreakTitle)
+				titleText = ui.TreeNormalFolder.Render(noBreakBody)
 			} else {
-				titleText = ui.TreeNormalItem.Render(noBreakTitle)
+				titleText = ui.TreeNormalItem.Render(noBreakBody)
 			}
-			treeLines = append(treeLines, indent+titleText)
+			treeLines = append(treeLines, indent+renderedPrefix+titleText)
 		}
 	}
 

@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/jolobtw/tome/internal/ui"
 )
 
 func TestVersionComparison(t *testing.T) {
@@ -69,5 +71,12 @@ func TestFooterHeightCalculation(t *testing.T) {
 	}
 	if hNarrow <= hWide {
 		t.Errorf("expected hNarrow (%d) > hWide (%d)", hNarrow, hWide)
+	}
+}
+
+func TestTreeGuideStyle(t *testing.T) {
+	renderedGuide := ui.TreeGuide.Render("│  ├─ ")
+	if renderedGuide == "" {
+		t.Errorf("expected rendered guide lines, got empty string")
 	}
 }
