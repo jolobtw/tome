@@ -201,12 +201,12 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 	}
 
 	ti := textinput.New()
-	ti.Placeholder = "Ask about your notes... (e.g. 'What did we decide on sync?')"
+	ti.Placeholder = "Ask a question about your notes..."
 	ti.CharLimit = 160
 	ti.Prompt = "✦ > "
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Bold(true)
-	ti.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright)
-	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Background(ui.ColorDarkSlate).Bold(true)
+	ti.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate)
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Background(ui.ColorDarkSlate).Italic(true)
 
 	ta := textarea.New()
 	ta.Placeholder = "Write your note here using Markdown..."
@@ -248,10 +248,10 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 
 	si := textinput.New()
 	si.Prompt = "🔍 "
-	si.PromptStyle = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Bold(true)
-	si.Placeholder = "Search note contents (e.g. dragon, quest, spell)..."
-	si.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright)
-	si.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
+	si.PromptStyle = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Background(ui.ColorDarkSlate).Bold(true)
+	si.Placeholder = "Search note contents..."
+	si.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate)
+	si.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Background(ui.ColorDarkSlate).Italic(true)
 	si.CharLimit = 80
 
 	// Detect terminal dimensions immediately so Tome launches instantly without hanging
@@ -1750,7 +1750,7 @@ func (m Model) View() string {
 		} else if m.aiQuery != "" && m.aiState == "thinking" {
 			answerArea = "\n  Communing with the Grimoire and researching your notes..."
 		} else {
-			answerArea = ui.SubtitleStyle.Render("\n  Type any question about your notes above and press [Enter] to research.")
+			answerArea = ui.SubtitleStyle.Render("\n  Ask any question to synthesize insights across your notes.")
 		}
 
 		drawerContent := fmt.Sprintf("%s\n\n%s\n%s", drawerTitle, inputRow, answerArea)
@@ -1766,16 +1766,16 @@ func (m Model) View() string {
 			if lipgloss.Width(l) > innerContentWidth {
 				l = truncateWithDots(l, innerContentWidth)
 			}
-			pad := max(0, innerContentWidth-lipgloss.Width(l))
-			clampedLines = append(clampedLines, l+strings.Repeat(" ", pad))
+			clampedLines = append(clampedLines, padRightWithBg(l, innerContentWidth, ui.ColorDarkSlate))
 		}
 		for len(clampedLines) < drawerContentHeight {
-			clampedLines = append(clampedLines, strings.Repeat(" ", innerContentWidth))
+			clampedLines = append(clampedLines, padRightWithBg("", innerContentWidth, ui.ColorDarkSlate))
 		}
 
 		aiBoxStyle := lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(ui.ColorFlameOrange).
+			BorderBackground(ui.ColorDarkSlate).
 			Background(ui.ColorDarkSlate).
 			Padding(0, 1)
 
@@ -1790,7 +1790,7 @@ func (m Model) View() string {
 			drawerLines = drawerLines[:m.animHeight]
 		}
 		for len(drawerLines) < m.animHeight {
-			drawerLines = append(drawerLines, strings.Repeat(" ", usableWidth))
+			drawerLines = append(drawerLines, padRightWithBg("", usableWidth, ui.ColorDarkSlate))
 		}
 
 		footerRow := len(bgLines) - 1
@@ -1834,16 +1834,16 @@ func (m Model) View() string {
 			if lipgloss.Width(l) > innerContentWidth {
 				l = truncateWithDots(l, innerContentWidth)
 			}
-			pad := max(0, innerContentWidth-lipgloss.Width(l))
-			clampedLines = append(clampedLines, l+strings.Repeat(" ", pad))
+			clampedLines = append(clampedLines, padRightWithBg(l, innerContentWidth, ui.ColorDarkSlate))
 		}
 		for len(clampedLines) < drawerContentHeight {
-			clampedLines = append(clampedLines, strings.Repeat(" ", innerContentWidth))
+			clampedLines = append(clampedLines, padRightWithBg("", innerContentWidth, ui.ColorDarkSlate))
 		}
 
 		cheatBoxStyle := lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(ui.ColorFlameOrange).
+			BorderBackground(ui.ColorDarkSlate).
 			Background(ui.ColorDarkSlate).
 			Padding(0, 1)
 
@@ -1858,7 +1858,7 @@ func (m Model) View() string {
 			drawerLines = drawerLines[:m.cheatHeight]
 		}
 		for len(drawerLines) < m.cheatHeight {
-			drawerLines = append(drawerLines, strings.Repeat(" ", usableWidth))
+			drawerLines = append(drawerLines, padRightWithBg("", usableWidth, ui.ColorDarkSlate))
 		}
 
 		footerRow := len(bgLines) - 1
@@ -1899,7 +1899,7 @@ func (m Model) View() string {
 		query := strings.TrimSpace(m.searchInput.Value())
 
 		if query == "" {
-			resultsLines = append(resultsLines, ui.SubtitleStyle.Render("\n  Type keywords (e.g. dragon, quest, spell) to search across all notes in your vault."))
+			resultsLines = append(resultsLines, ui.SubtitleStyle.Render("\n  Type to search note contents across your vault."))
 		} else if len(m.searchResults) == 0 {
 			resultsLines = append(resultsLines, ui.SubtitleStyle.Render(fmt.Sprintf("\n  No notes found matching %q.", query)))
 		} else {
@@ -2857,11 +2857,7 @@ func padRight(s string, width int) string {
 }
 
 func padRightWithBg(s string, width int, bg lipgloss.Color) string {
-	w := lipgloss.Width(s)
-	if w >= width {
-		return s
-	}
-	return s + lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", width-w))
+	return ui.FillLineBg(s, width, bg)
 }
 
 func renderCheatSheetContent(innerWidth int) string {

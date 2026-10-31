@@ -197,3 +197,27 @@ func TestFillLineBg(t *testing.T) {
 		t.Errorf("expected visual width 40, got %d", lipgloss.Width(filled))
 	}
 }
+
+func TestDrawerPlaceholdersAndEmptyStates(t *testing.T) {
+	// Search placeholder and empty state
+	searchPlaceholder := "Search note contents..."
+	searchEmptyState := "Type to search note contents across your vault."
+
+	if strings.Contains(searchPlaceholder, "dragon") || strings.Contains(searchPlaceholder, "spell") {
+		t.Errorf("search placeholder should not contain redundant keyword examples")
+	}
+	if strings.Contains(searchEmptyState, "dragon") || strings.Contains(searchEmptyState, "spell") {
+		t.Errorf("search empty state should not contain redundant keyword examples")
+	}
+
+	// Research placeholder and empty state
+	aiPlaceholder := "Ask a question about your notes..."
+	aiEmptyState := "Ask any question to synthesize insights across your notes."
+
+	if strings.Contains(aiPlaceholder, "sync") {
+		t.Errorf("research placeholder should be concise")
+	}
+	if strings.Contains(aiEmptyState, "Grimoire") && !strings.Contains(aiEmptyState, "insights") {
+		t.Errorf("research empty state should be clean and subtle")
+	}
+}
