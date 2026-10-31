@@ -200,13 +200,7 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 		allNodes, isObsidian, _ = notes.ScanTree(workspacePath, cfg.SortMode)
 	}
 
-	ti := textinput.New()
-	ti.Placeholder = "Ask a question about your notes..."
-	ti.CharLimit = 160
-	ti.Prompt = "✦ > "
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Background(ui.ColorDarkSlate).Bold(true)
-	ti.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate)
-	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Background(ui.ColorDarkSlate).Italic(true)
+	ti := newAIInput()
 
 	ta := textarea.New()
 	ta.Placeholder = "Write your note here using Markdown..."
@@ -246,13 +240,7 @@ Your new arcane terminal notebook is now connected to **` + workspacePath + `**!
 	fi.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Italic(true)
 	fi.CharLimit = 50
 
-	si := textinput.New()
-	si.Prompt = "🔍 "
-	si.PromptStyle = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Background(ui.ColorDarkSlate).Bold(true)
-	si.Placeholder = "Search note contents..."
-	si.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate)
-	si.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Background(ui.ColorDarkSlate).Italic(true)
-	si.CharLimit = 80
+	si := newSearchInput()
 
 	// Detect terminal dimensions immediately so Tome launches instantly without hanging
 	termW, termH, err := term.GetSize(os.Stdout.Fd())
@@ -3013,4 +3001,26 @@ func getTreeNodeArrow(isFolder bool, hasChildren bool, isExpanded bool) string {
 		return "▾ "
 	}
 	return "▸ "
+}
+
+func newSearchInput() textinput.Model {
+	si := textinput.New()
+	si.Prompt = "🔍 "
+	si.PromptStyle = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Background(ui.ColorDarkSlate).Bold(true)
+	si.Placeholder = "Search note contents..."
+	si.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate)
+	si.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Background(ui.ColorDarkSlate).Italic(true)
+	si.CharLimit = 80
+	return si
+}
+
+func newAIInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "Ask a question about your notes..."
+	ti.CharLimit = 160
+	ti.Prompt = "✦ > "
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(ui.ColorFlameOrange).Background(ui.ColorDarkSlate).Bold(true)
+	ti.TextStyle = lipgloss.NewStyle().Foreground(ui.ColorTextBright).Background(ui.ColorDarkSlate)
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.ColorTextMuted).Background(ui.ColorDarkSlate).Italic(true)
+	return ti
 }

@@ -189,8 +189,9 @@ func TestFillLineBg(t *testing.T) {
 	raw := "\x1b[1;38;2;255;121;0m🔍 \x1b[0mS\x1b[0mearch...                  "
 	filled := ui.FillLineBg(raw, 40, bg)
 
-	if !strings.Contains(filled, "\x1b[48;2;19;20;28m") {
-		t.Errorf("expected filled line to contain background ANSI sequence, got: %q", filled)
+	// Specifically verify that inner \x1b[0m resets re-assert the background sequence
+	if !strings.Contains(filled, "\x1b[0m\x1b[48;2;19;20;28m") {
+		t.Errorf("expected inner ANSI reset to re-assert background sequence, got: %q", filled)
 	}
 
 	if lipgloss.Width(filled) != 40 {
@@ -199,25 +200,19 @@ func TestFillLineBg(t *testing.T) {
 }
 
 func TestDrawerPlaceholdersAndEmptyStates(t *testing.T) {
-	// Search placeholder and empty state
-	searchPlaceholder := "Search note contents..."
-	searchEmptyState := "Type to search note contents across your vault."
-
-	if strings.Contains(searchPlaceholder, "dragon") || strings.Contains(searchPlaceholder, "spell") {
-		t.Errorf("search placeholder should not contain redundant keyword examples")
+	si := newSearchInput()
+	if si.Placeholder != "Search note contents..." {
+		t.Errorf("expected clean search placeholder, got %q", si.Placeholder)
 	}
-	if strings.Contains(searchEmptyState, "dragon") || strings.Contains(searchEmptyState, "spell") {
-		t.Errorf("search empty state should not contain redundant keyword examples")
+	if strings.Contains(si.Placeholder, "dragon") || strings.Contains(si.Placeholder, "spell") {
+		t.Errorf("search placeholder contains redundant keyword examples: %q", si.Placeholder)
 	}
 
-	// Research placeholder and empty state
-	aiPlaceholder := "Ask a question about your notes..."
-	aiEmptyState := "Ask any question to synthesize insights across your notes."
-
-	if strings.Contains(aiPlaceholder, "sync") {
-		t.Errorf("research placeholder should be concise")
+	ai := newAIInput()
+	if ai.Placeholder != "Ask a question about your notes..." {
+		t.Errorf("expected clean AI placeholder, got %q", ai.Placeholder)
 	}
-	if strings.Contains(aiEmptyState, "Grimoire") && !strings.Contains(aiEmptyState, "insights") {
-		t.Errorf("research empty state should be clean and subtle")
+	if strings.Contains(ai.Placeholder, "sync") {
+		t.Errorf("AI placeholder contains redundant sync examples: %q", ai.Placeholder)
 	}
 }
