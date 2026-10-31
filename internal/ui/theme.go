@@ -553,3 +553,19 @@ func DimANSILine(s string, factor float64) string {
 
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", dimR, dimG, dimB, res)
 }
+
+// FillLineBg pads an ANSI line to the target width and ensures that every character
+// and whitespace padding retains the given background color, even across ANSI reset codes.
+func FillLineBg(line string, width int, bg lipgloss.Color) string {
+	trimmed := strings.TrimRight(line, " ")
+	w := lipgloss.Width(trimmed)
+	padLen := max(0, width-w)
+	padded := trimmed + strings.Repeat(" ", padLen)
+
+	r, g, b := HexToRGB(string(bg))
+	bgPrefix := fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, b)
+
+	reasserted := strings.ReplaceAll(padded, "\x1b[0m", "\x1b[0m"+bgPrefix)
+	reasserted = strings.ReplaceAll(reasserted, "\x1b[m", "\x1b[m"+bgPrefix)
+	return bgPrefix + reasserted + "\x1b[0m"
+}

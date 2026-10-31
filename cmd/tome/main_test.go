@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jolobtw/tome/internal/notes"
 	"github.com/jolobtw/tome/internal/ui"
 )
@@ -180,5 +181,19 @@ func TestFormatTreeNodeDisplay(t *testing.T) {
 	resFiltered := formatTreeNodeDisplay(noteInSubdir, true)
 	if !strings.Contains(resFiltered, "  󰈙 World (Lore)") {
 		t.Errorf("expected filtered note to show directory suffix, got %q", resFiltered)
+	}
+}
+
+func TestFillLineBg(t *testing.T) {
+	bg := ui.ColorDarkSlate // #13141C -> \x1b[48;2;19;20;28m
+	raw := "\x1b[1;38;2;255;121;0m🔍 \x1b[0mS\x1b[0mearch...                  "
+	filled := ui.FillLineBg(raw, 40, bg)
+
+	if !strings.Contains(filled, "\x1b[48;2;19;20;28m") {
+		t.Errorf("expected filled line to contain background ANSI sequence, got: %q", filled)
+	}
+
+	if lipgloss.Width(filled) != 40 {
+		t.Errorf("expected visual width 40, got %d", lipgloss.Width(filled))
 	}
 }
