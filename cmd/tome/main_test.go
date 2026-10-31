@@ -80,3 +80,22 @@ func TestTreeGuideStyle(t *testing.T) {
 		t.Errorf("expected rendered guide lines, got empty string")
 	}
 }
+
+func TestDimANSILine(t *testing.T) {
+	// Plain text should be wrapped in dimmed foreground
+	plain := "Hello world note preview"
+	dimmedPlain := ui.DimANSILine(plain, 0.35)
+	if !strings.Contains(dimmedPlain, "\x1b[38;2;") || !strings.Contains(dimmedPlain, "Hello world") {
+		t.Errorf("expected plain text to be wrapped in dimmed foreground, got: %q", dimmedPlain)
+	}
+
+	// Bold compound text should convert 1 to 22 and dim RGB colors
+	compound := "\x1b[1;38;2;255;255;255;48;2;38;40;56m1. Terra Campaign\x1b[0m"
+	dimmedCompound := ui.DimANSILine(compound, 0.35)
+	if strings.Contains(dimmedCompound, "38;2;255;255;255") {
+		t.Errorf("expected bright white to be dimmed, got: %q", dimmedCompound)
+	}
+	if strings.Contains(dimmedCompound, "[1;") {
+		t.Errorf("expected bold code 1 to be removed or converted to 22, got: %q", dimmedCompound)
+	}
+}

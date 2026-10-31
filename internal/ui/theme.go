@@ -382,31 +382,174 @@ func FormatHeader(appTitle, tagline string, badges []string, width int) (row1, r
 }
 
 var (
-	ansiFgRegex = regexp.MustCompile(`\x1b\[38;2;(\d+);(\d+);(\d+)m`)
-	ansiBgRegex = regexp.MustCompile(`\x1b\[48;2;(\d+);(\d+);(\d+)m`)
+	sgrRegex = regexp.MustCompile(`\x1b\[([0-9;]*)m`)
 )
 
-// DimANSILine scales down TrueColor RGB sequences in an ANSI line to produce a subtle dimmed backdrop
+func ansi256ToRGB(code int) (int, int, int) {
+	if code < 16 {
+		return ansi16ToRGB(code)
+	}
+	if code <= 231 {
+		code -= 16
+		r := (code / 36) * 51
+		g := ((code % 36) / 6) * 51
+		b := (code % 6) * 51
+		return r, g, b
+	}
+	if code <= 255 {
+		gray := (code-232)*10 + 8
+		return gray, gray, gray
+	}
+	return 255, 255, 255
+}
+
+func ansi16ToRGB(code int) (int, int, int) {
+	switch code {
+	case 0:
+		return 0, 0, 0
+	case 1:
+		return 205, 49, 49
+	case 2:
+		return 13, 188, 121
+	case 3:
+		return 229, 229, 16
+	case 4:
+		return 36, 114, 200
+	case 5:
+		return 188, 63, 188
+	case 6:
+		return 17, 168, 205
+	case 7:
+		return 229, 229, 229
+	case 8:
+		return 102, 102, 102
+	case 9:
+		return 241, 76, 76
+	case 10:
+		return 35, 209, 139
+	case 11:
+		return 245, 245, 67
+	case 12:
+		return 59, 142, 234
+	case 13:
+		return 214, 112, 214
+	case 14:
+		return 41, 184, 219
+	case 15:
+		return 255, 255, 255
+	default:
+		return 200, 200, 200
+	}
+}
+
+// DimANSILine scales down all ANSI foreground, background, and text sequences in an ANSI line
+// to produce a uniform, beautifully dimmed backdrop scrim
 func DimANSILine(s string, factor float64) string {
-	s = ansiFgRegex.ReplaceAllStringFunc(s, func(m string) string {
-		sub := ansiFgRegex.FindStringSubmatch(m)
-		r, _ := strconv.Atoi(sub[1])
-		g, _ := strconv.Atoi(sub[2])
-		b, _ := strconv.Atoi(sub[3])
-		dimR := int(float64(r) * factor)
-		dimG := int(float64(g) * factor)
-		dimB := int(float64(b) * factor)
-		return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", dimR, dimG, dimB)
+	if strings.TrimSpace(s) == "" {
+		return s
+	}
+
+	dimHex := string(ColorDimmedText)
+	if dimHex == "" {
+		dimHex = "#3E4259"
+	}
+	dimR, dimG, dimB := HexToRGB(dimHex)
+
+	res := sgrRegex.ReplaceAllStringFunc(s, func(seq string) string {
+		match := sgrRegex.FindStringSubmatch(seq)
+		paramsStr := match[1]
+		if paramsStr == "" || paramsStr == "0" {
+			// SGR Reset: clear text attributes, then set foreground to dimmed default text
+			return fmt.Sprintf("\x1b[0m\x1b[38;2;%d;%d;%dm", dimR, dimG, dimB)
+		}
+
+		parts := strings.Split(paramsStr, ";")
+		var newParts []string
+		for i := 0; i < len(parts); i++ {
+			p := parts[i]
+			val, err := strconv.Atoi(p)
+			if err != nil {
+				newParts = append(newParts, p)
+				continue
+			}
+
+			switch {
+			case val == 38 && i+4 < len(parts) && parts[i+1] == "2":
+				// TrueColor foreground: 38;2;r;g;b
+				r, _ := strconv.Atoi(parts[i+2])
+				g, _ := strconv.Atoi(parts[i+3])
+				b, _ := strconv.Atoi(parts[i+4])
+				newR := int(float64(r) * factor)
+				newG := int(float64(g) * factor)
+				newB := int(float64(b) * factor)
+				newParts = append(newParts, "38", "2", strconv.Itoa(newR), strconv.Itoa(newG), strconv.Itoa(newB))
+				i += 4
+
+			case val == 48 && i+4 < len(parts) && parts[i+1] == "2":
+				// TrueColor background: 48;2;r;g;b
+				r, _ := strconv.Atoi(parts[i+2])
+				g, _ := strconv.Atoi(parts[i+3])
+				b, _ := strconv.Atoi(parts[i+4])
+				newR := int(float64(r) * factor)
+				newG := int(float64(g) * factor)
+				newB := int(float64(b) * factor)
+				newParts = append(newParts, "48", "2", strconv.Itoa(newR), strconv.Itoa(newG), strconv.Itoa(newB))
+				i += 4
+
+			case val == 38 && i+2 < len(parts) && parts[i+1] == "5":
+				// 256-color foreground: 38;5;n
+				n, _ := strconv.Atoi(parts[i+2])
+				r, g, b := ansi256ToRGB(n)
+				newR := int(float64(r) * factor)
+				newG := int(float64(g) * factor)
+				newB := int(float64(b) * factor)
+				newParts = append(newParts, "38", "2", strconv.Itoa(newR), strconv.Itoa(newG), strconv.Itoa(newB))
+				i += 2
+
+			case val == 48 && i+2 < len(parts) && parts[i+1] == "5":
+				// 256-color background: 48;5;n
+				n, _ := strconv.Atoi(parts[i+2])
+				r, g, b := ansi256ToRGB(n)
+				newR := int(float64(r) * factor)
+				newG := int(float64(g) * factor)
+				newB := int(float64(b) * factor)
+				newParts = append(newParts, "48", "2", strconv.Itoa(newR), strconv.Itoa(newG), strconv.Itoa(newB))
+				i += 2
+
+			case val >= 30 && val <= 37:
+				// 16-color foreground (normal)
+				r, g, b := ansi16ToRGB(val - 30)
+				newParts = append(newParts, "38", "2", strconv.Itoa(int(float64(r)*factor)), strconv.Itoa(int(float64(g)*factor)), strconv.Itoa(int(float64(b)*factor)))
+
+			case val >= 90 && val <= 97:
+				// 16-color foreground (bright)
+				r, g, b := ansi16ToRGB(val - 90 + 8)
+				newParts = append(newParts, "38", "2", strconv.Itoa(int(float64(r)*factor)), strconv.Itoa(int(float64(g)*factor)), strconv.Itoa(int(float64(b)*factor)))
+
+			case val >= 40 && val <= 47:
+				// 16-color background (normal)
+				r, g, b := ansi16ToRGB(val - 40)
+				newParts = append(newParts, "48", "2", strconv.Itoa(int(float64(r)*factor)), strconv.Itoa(int(float64(g)*factor)), strconv.Itoa(int(float64(b)*factor)))
+
+			case val >= 100 && val <= 107:
+				// 16-color background (bright)
+				r, g, b := ansi16ToRGB(val - 100 + 8)
+				newParts = append(newParts, "48", "2", strconv.Itoa(int(float64(r)*factor)), strconv.Itoa(int(float64(g)*factor)), strconv.Itoa(int(float64(b)*factor)))
+
+			case val == 1:
+				// Turn bold off on dimmed background elements so they don't pop out
+				newParts = append(newParts, "22")
+
+			case val == 0:
+				// Reset embedded in compound sequence
+				newParts = append(newParts, "0", "38", "2", strconv.Itoa(int(dimR)), strconv.Itoa(int(dimG)), strconv.Itoa(int(dimB)))
+
+			default:
+				newParts = append(newParts, p)
+			}
+		}
+		return "\x1b[" + strings.Join(newParts, ";") + "m"
 	})
-	s = ansiBgRegex.ReplaceAllStringFunc(s, func(m string) string {
-		sub := ansiBgRegex.FindStringSubmatch(m)
-		r, _ := strconv.Atoi(sub[1])
-		g, _ := strconv.Atoi(sub[2])
-		b, _ := strconv.Atoi(sub[3])
-		dimR := int(float64(r) * factor)
-		dimG := int(float64(g) * factor)
-		dimB := int(float64(b) * factor)
-		return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", dimR, dimG, dimB)
-	})
-	return s
+
+	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", dimR, dimG, dimB, res)
 }
