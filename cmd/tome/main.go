@@ -24,7 +24,7 @@ import (
 	"github.com/jolobtw/tome/internal/ui"
 )
 
-const AppVersion = "v1.0.12"
+const AppVersion = "v1.0.13"
 
 type ContextLine struct {
 	LineNum int
@@ -1378,10 +1378,12 @@ func (m Model) renderActivePreview(width int) string {
 	// Folder Overview Card
 	if item.IsFolder {
 		status := "Collapsed (Press [Enter] to expand)"
+		folderIcon := " "
 		if item.Expanded {
 			status = "Expanded (Press [Enter] to collapse)"
+			folderIcon = " "
 		}
-		title := ui.BrandStyle.Render("📁 " + item.Title)
+		title := ui.BrandStyle.Render(folderIcon + item.Title)
 		info := fmt.Sprintf("\n  %s\n\n  • **Path:** `%s`\n  • **Notes Contained:** %d\n  • **State:** %s\n\n  Press **[Enter]**, **[Space]**, or click to toggle folder contents.",
 			title, item.RelPath, item.NoteCount, status)
 		return markdown.RenderDocument(info, width)
@@ -2065,7 +2067,7 @@ func (m Model) View() string {
 			icon := "󰈙 "
 			if m.modalTargetItem != nil && m.modalTargetItem.IsFolder {
 				itemType = "FOLDER"
-				icon = "📁 "
+				icon = " "
 			}
 			currName := ""
 			if m.modalTargetItem != nil {
@@ -2110,10 +2112,10 @@ func (m Model) View() string {
 
 				if idx == m.moveSelected {
 					cursor := ui.TreeCursor.Background(modalBg).Render("❯ ")
-					pill := ui.ActiveBadgeStyle.Render("📁 " + displayName)
+					pill := ui.ActiveBadgeStyle.Render(" " + displayName)
 					folderLines = append(folderLines, cursor+pill)
 				} else {
-					folderLines = append(folderLines, "  "+ui.TreeNormalFolder.Background(modalBg).Render("📁 "+displayName))
+					folderLines = append(folderLines, "  "+ui.TreeNormalFolder.Background(modalBg).Render(" "+displayName))
 				}
 			}
 			bodyView = strings.Join(folderLines, "\n")
@@ -2737,7 +2739,7 @@ func formatBreadcrumb(relPath string, lineNum int, isSelected bool, maxWidth int
 	if len(parts) > 1 {
 		folderStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C5A880")).Background(ui.ColorDarkSlate)
 		for _, f := range parts[:len(parts)-1] {
-			breadParts = append(breadParts, folderStyle.Render("📁 "+f))
+			breadParts = append(breadParts, folderStyle.Render(" "+f))
 		}
 	}
 
