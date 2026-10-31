@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jolobtw/tome/internal/notes"
 	"github.com/jolobtw/tome/internal/ui"
 )
 
@@ -124,5 +125,60 @@ func TestGetTreeNodeArrow(t *testing.T) {
 					tt.isFolder, tt.hasChildren, tt.isExpanded, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestFormatTreeNodeDisplay(t *testing.T) {
+	folderWithChildren := &notes.Node{
+		Title:    "Lore",
+		IsFolder: true,
+		ChildIDs: []int{1, 2},
+		Expanded: false,
+	}
+	resCollapsed := formatTreeNodeDisplay(folderWithChildren, false)
+	if !strings.HasPrefix(resCollapsed, "▸  Lore") {
+		t.Errorf("expected collapsed folder to start with '▸  Lore', got %q", resCollapsed)
+	}
+
+	folderExpanded := &notes.Node{
+		Title:    "Lore",
+		IsFolder: true,
+		ChildIDs: []int{1, 2},
+		Expanded: true,
+	}
+	resExpanded := formatTreeNodeDisplay(folderExpanded, false)
+	if !strings.HasPrefix(resExpanded, "▾  Lore") {
+		t.Errorf("expected expanded folder to start with '▾  Lore', got %q", resExpanded)
+	}
+
+	emptyFolder := &notes.Node{
+		Title:    "Empty",
+		IsFolder: true,
+		ChildIDs: nil,
+		Expanded: false,
+	}
+	resEmpty := formatTreeNodeDisplay(emptyFolder, false)
+	if !strings.HasPrefix(resEmpty, "   Empty") {
+		t.Errorf("expected empty folder to start with '   Empty', got %q", resEmpty)
+	}
+
+	noteNode := &notes.Node{
+		Title:    "QuickLog",
+		IsFolder: false,
+	}
+	resNote := formatTreeNodeDisplay(noteNode, false)
+	if !strings.HasPrefix(resNote, "  󰈙 QuickLog") {
+		t.Errorf("expected note to start with '  󰈙 QuickLog', got %q", resNote)
+	}
+
+	// Filter active mode
+	noteInSubdir := &notes.Node{
+		Title:    "World",
+		RelPath:  "Lore/World.md",
+		IsFolder: false,
+	}
+	resFiltered := formatTreeNodeDisplay(noteInSubdir, true)
+	if !strings.Contains(resFiltered, "  󰈙 World (Lore)") {
+		t.Errorf("expected filtered note to show directory suffix, got %q", resFiltered)
 	}
 }

@@ -1552,27 +1552,10 @@ func (m Model) View() string {
 			continue
 		}
 
-		icon := "󰈙 "
-		if item.IsFolder {
-			if item.Expanded {
-				icon = " "
-			} else {
-				icon = " "
-			}
-		}
-
-		var nodeDisplay string
+		nodeDisplay := formatTreeNodeDisplay(item, m.filterActive)
 		var prefix string
-		if m.filterActive {
-			dir := filepath.Dir(item.RelPath)
-			if dir != "." && dir != "" {
-				nodeDisplay = fmt.Sprintf("%s%s (%s)", icon, item.Title, dir)
-			} else {
-				nodeDisplay = icon + item.Title
-			}
-		} else {
+		if !m.filterActive {
 			prefix = item.Prefix
-			nodeDisplay = icon + item.Title
 		}
 
 		prefixWidth := lipgloss.Width(prefix)
@@ -2996,6 +2979,32 @@ func isNewerVersion(current, latest string) bool {
 		}
 	}
 	return false
+}
+
+// formatTreeNodeDisplay builds the rendered title string for a tree node, including
+// expander arrows for folders with contents, type icons, and directory info when filtering.
+func formatTreeNodeDisplay(item *notes.Node, isFilterActive bool) string {
+	hasChildren := len(item.ChildIDs) > 0
+	arrow := getTreeNodeArrow(item.IsFolder, hasChildren, item.Expanded)
+
+	icon := "󰈙 "
+	if item.IsFolder {
+		if item.Expanded {
+			icon = " "
+		} else {
+			icon = " "
+		}
+	}
+
+	if isFilterActive {
+		dir := filepath.Dir(item.RelPath)
+		if dir != "." && dir != "" {
+			return fmt.Sprintf("%s%s%s (%s)", arrow, icon, item.Title, dir)
+		}
+		return arrow + icon + item.Title
+	}
+
+	return arrow + icon + item.Title
 }
 
 // getTreeNodeArrow returns an expand/collapse arrow for folders with contents,
