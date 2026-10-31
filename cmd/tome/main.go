@@ -2997,3 +2997,15 @@ func isNewerVersion(current, latest string) bool {
 	}
 	return false
 }
+
+// getTreeNodeArrow returns an expand/collapse arrow for folders with contents,
+// or two spaces for empty folders and notes to preserve vertical alignment.
+func getTreeNodeArrow(isFolder bool, hasChildren bool, isExpanded bool) string {
+	if !isFolder || !hasChildren {
+		return "  "
+	}
+	if isExpanded {
+		return "▾ "
+	}
+	return "▸ "
+}

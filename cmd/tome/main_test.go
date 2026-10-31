@@ -99,3 +99,30 @@ func TestDimANSILine(t *testing.T) {
 		t.Errorf("expected bold code 1 to be removed or converted to 22, got: %q", dimmedCompound)
 	}
 }
+
+func TestGetTreeNodeArrow(t *testing.T) {
+	tests := []struct {
+		name        string
+		isFolder    bool
+		hasChildren bool
+		isExpanded  bool
+		expected    string
+	}{
+		{"Folder with children collapsed", true, true, false, "▸ "},
+		{"Folder with children expanded", true, true, true, "▾ "},
+		{"Empty folder collapsed", true, false, false, "  "},
+		{"Empty folder expanded", true, false, true, "  "},
+		{"Note file", false, false, false, "  "},
+		{"Note file with children flag false", false, true, false, "  "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getTreeNodeArrow(tt.isFolder, tt.hasChildren, tt.isExpanded)
+			if got != tt.expected {
+				t.Errorf("getTreeNodeArrow(%v, %v, %v) = %q; want %q",
+					tt.isFolder, tt.hasChildren, tt.isExpanded, got, tt.expected)
+			}
+		})
+	}
+}
