@@ -216,3 +216,95 @@ func TestDrawerPlaceholdersAndEmptyStates(t *testing.T) {
 		t.Errorf("AI placeholder contains redundant sync examples: %q", ai.Placeholder)
 	}
 }
+
+func TestBuildNewNoteDetails(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           string
+		wantFileName    string
+		wantTitle       string
+		wantContent     string
+		wantErr         bool
+		errContains     string
+	}{
+		{
+			name:         "Standard note name with spaces and casing",
+			input:        "Meeting Notes with Team",
+			wantFileName: "Meeting Notes with Team.md",
+			wantTitle:    "Meeting Notes with Team",
+			wantContent:  "# Meeting Notes with Team\n\n",
+			wantErr:      false,
+		},
+		{
+			name:         "Note name with .md extension already typed",
+			input:        "Project Roadmap.md",
+			wantFileName: "Project Roadmap.md",
+			wantTitle:    "Project Roadmap",
+			wantContent:  "# Project Roadmap\n\n",
+			wantErr:      false,
+		},
+		{
+			name:         "Note name with leading and trailing whitespace",
+			input:        "   Arcane Spells   ",
+			wantFileName: "Arcane Spells.md",
+			wantTitle:    "Arcane Spells",
+			wantContent:  "# Arcane Spells\n\n",
+			wantErr:      false,
+		},
+		{
+			name:        "Empty input",
+			input:       "   ",
+			wantErr:     true,
+			errContains: "empty note name",
+		},
+		{
+			name:        "Only .md typed",
+			input:       ".md",
+			wantErr:     true,
+			errContains: "empty note name",
+		},
+		{
+			name:        "Invalid filename characters",
+			input:       "Plan: Part 1",
+			wantErr:     true,
+			errContains: "cannot contain",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fileName, title, content, err := buildNewNoteDetails(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.errContains)
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if fileName != tt.wantFileName {
+				t.Errorf("fileName = %q; want %q", fileName, tt.wantFileName)
+			}
+			if title != tt.wantTitle {
+				t.Errorf("title = %q; want %q", title, tt.wantTitle)
+			}
+			if content != tt.wantContent {
+				t.Errorf("content = %q; want %q", content, tt.wantContent)
+			}
+
+			// Ensure Obsidian tags and frontmatter are NOT present
+			if strings.Contains(content, "tags:") {
+				t.Errorf("initial content should not contain obsidian tags: %q", content)
+			}
+			if strings.Contains(content, "---") {
+				t.Errorf("initial content should not contain frontmatter dashes: %q", content)
+			}
+		})
+	}
+}

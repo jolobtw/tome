@@ -2429,6 +2429,7 @@ func (m *Model) confirmMove() {
 
 func (m *Model) openNewNoteModal() {
 	m.modalType = "new_note"
+	m.modalError = ""
 	m.modalDestPath = m.getDestinationDir()
 	m.modalInput.Reset()
 	m.modalInput.Placeholder = "Note title (e.g. Arcane Secrets)"
@@ -2437,6 +2438,7 @@ func (m *Model) openNewNoteModal() {
 
 func (m *Model) openNewFolderModal() {
 	m.modalType = "new_folder"
+	m.modalError = ""
 	m.modalDestPath = m.getDestinationDir()
 	m.modalInput.Reset()
 	m.modalInput.Placeholder = "Folder name (e.g. Campaign Lore)"
@@ -2492,22 +2494,42 @@ func (m *Model) rescanTreePreservingExpansion(targetPath string) {
 	m.rebuildVisible()
 }
 
+func buildNewNoteDetails(rawInput string) (fileName string, title string, initialContent string, err error) {
+	rawInput = strings.TrimSpace(rawInput)
+	if rawInput == "" {
+		return "", "", "", fmt.Errorf("empty note name")
+	}
+	if strings.ContainsAny(rawInput, `\/:*?"<>|`) {
+		return "", "", "", fmt.Errorf(`Name cannot contain \ / : * ? " < > |`)
+	}
+
+	displayTitle := rawInput
+	if strings.HasSuffix(strings.ToLower(displayTitle), ".md") {
+		displayTitle = displayTitle[:len(displayTitle)-3]
+	}
+	displayTitle = strings.TrimSpace(displayTitle)
+	if displayTitle == "" {
+		return "", "", "", fmt.Errorf("empty note name")
+	}
+
+	fileName = displayTitle + ".md"
+	initialContent = fmt.Sprintf("# %s\n\n", displayTitle)
+	return fileName, displayTitle, initialContent, nil
+}
+
 func (m *Model) confirmNewNote() tea.Cmd {
-	title := strings.TrimSpace(m.modalInput.Value())
-	if title == "" {
-		m.modalType = ""
-		m.modalInput.Blur()
+	fileName, displayTitle, initialContent, err := buildNewNoteDetails(m.modalInput.Value())
+	if err != nil {
+		if strings.TrimSpace(m.modalInput.Value()) == "" || displayTitle == "" {
+			m.modalType = ""
+			m.modalError = ""
+			m.modalInput.Blur()
+			return nil
+		}
+		m.modalError = err.Error()
 		return nil
 	}
 
-	slug := slugify(title)
-	if slug == "" {
-		slug = "untitled"
-	}
-
-	now := time.Now()
-	datePrefix := now.Format("2006-01-02")
-	fileName := fmt.Sprintf("%s-%s.md", datePrefix, slug)
 	targetPath := filepath.Join(m.modalDestPath, fileName)
 
 	// Avoid overwriting existing notes with same name
@@ -2516,19 +2538,17 @@ func (m *Model) confirmNewNote() tea.Cmd {
 		if _, err := os.Stat(targetPath); os.IsNotExist(err) {
 			break
 		}
-		fileName = fmt.Sprintf("%s-%s-%d.md", datePrefix, slug, counter)
+		fileName = fmt.Sprintf("%s %d.md", displayTitle, counter)
 		targetPath = filepath.Join(m.modalDestPath, fileName)
 		counter++
 	}
 
-	timestamp := now.Format("2006-01-02 15:04")
-	initialContent := fmt.Sprintf("---\ntitle: %q\ndate: %s\ntags:\n  - note\n---\n\n# %s\n\n", title, timestamp, title)
-
 	if err := os.WriteFile(targetPath, []byte(initialContent), 0644); err != nil {
-		m.modalType = ""
-		m.modalInput.Blur()
+		m.modalError = fmt.Sprintf("Error creating note: %v", err)
 		return nil
 	}
+
+	m.modalError = ""
 
 	// Rescan tree while preserving all expanded folders, and select the new note
 	m.rescanTreePreservingExpansion(targetPath)
