@@ -1,5 +1,15 @@
 # Tome Release Notes
 
+## Version 1.0.14
+**Date:** 2026-11-03
+
+### Clean Note Creation & Exact Filenames
+- **Exact Note Naming:** New notes now preserve the exact casing, spaces, and wording entered during creation. Injected `YYYY-MM-DD-` date prefixes and lowercase hyphenation have been removed.
+- **Obsidian Tag & Frontmatter Removal:** Notes now start cleanly with just the title header (`# Note Name`) and a blank line ready for typing, removing unwanted Obsidian-style YAML frontmatter and `tags: - note`.
+- **Duplicate Collision Handling:** If a note with the exact name already exists in the same folder, Tome automatically appends an incremented number (e.g. `Note 1.md`) to prevent overwriting existing files.
+
+---
+
 ## Version 1.0.8
 **Date:** 2026-10-28
 

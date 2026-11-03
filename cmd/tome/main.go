@@ -24,7 +24,7 @@ import (
 	"github.com/jolobtw/tome/internal/ui"
 )
 
-const AppVersion = "v1.0.13"
+const AppVersion = "v1.0.14"
 
 type ContextLine struct {
 	LineNum int
