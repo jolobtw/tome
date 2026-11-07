@@ -2367,9 +2367,13 @@ func (m *Model) openMoveModal() {
 
 	destFolders := []string{m.workspacePath}
 	cleanItemPath := filepath.Clean(item.Path)
+	cleanWorkspacePath := filepath.Clean(m.workspacePath)
 	for _, n := range m.allNodes {
 		if n.IsFolder {
 			cleanNodePath := filepath.Clean(n.Path)
+			if cleanNodePath == cleanWorkspacePath {
+				continue
+			}
 			if cleanNodePath == cleanItemPath {
 				continue
 			}
@@ -2483,10 +2487,8 @@ func (m *Model) rescanTreePreservingExpansion(targetPath string) {
 		if m.allNodes[idx].IsFolder {
 			cleanNodePath := filepath.Clean(m.allNodes[idx].Path)
 
-			// Keep previously expanded folders open
-			if expandedFolders[cleanNodePath] {
-				m.allNodes[idx].Expanded = true
-			}
+			// Restore previous expansion state
+			m.allNodes[idx].Expanded = expandedFolders[cleanNodePath]
 
 			// Also expand all ancestors of the target item so it's visible in the tree
 			if cleanTarget != "" && cleanNodePath != cleanTarget {

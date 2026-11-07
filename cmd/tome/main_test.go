@@ -459,3 +459,77 @@ func TestRootNodeCollapseInVisibleIndices(t *testing.T) {
 		t.Errorf("expected visible item to be root node (ID 0), got %d", m.visibleIndices[0])
 	}
 }
+
+func TestOpenMoveModalNoDuplicateRootFolder(t *testing.T) {
+	wsPath := "C:\\Users\\test\\vault"
+	subPath := filepath.Join(wsPath, "SubFolder")
+	m := Model{
+		workspacePath:  wsPath,
+		workspaceName:  "vault",
+		visibleIndices: []int{0, 1},
+		selectedIdx:    1,
+		allNodes: []notes.Node{
+			{
+				ID:       0,
+				Title:    "vault",
+				Path:     wsPath,
+				IsFolder: true,
+				ParentID: -1,
+				Level:    0,
+			},
+			{
+				ID:       1,
+				Title:    "SubFolder",
+				Path:     subPath,
+				IsFolder: true,
+				ParentID: 0,
+				Level:    1,
+			},
+		},
+	}
+
+	m.openMoveModal()
+	countRoot := 0
+	cleanRoot := filepath.Clean(wsPath)
+	for _, f := range m.moveFolders {
+		if filepath.Clean(f) == cleanRoot {
+			countRoot++
+		}
+	}
+	if countRoot != 1 {
+		t.Errorf("expected root folder to appear in moveFolders exactly once, got %d times in %v", countRoot, m.moveFolders)
+	}
+}
+
+func TestRescanTreePreservesCollapsedRoot(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "tome-rescan-collapsed-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	subFolder := filepath.Join(tempDir, "SubFolder")
+	if err := os.Mkdir(subFolder, 0755); err != nil {
+		t.Fatalf("failed to create subfolder: %v", err)
+	}
+
+	m := Model{
+		workspacePath: tempDir,
+		workspaceName: filepath.Base(tempDir),
+	}
+	nodes, _, err := notes.ScanTree(tempDir, "alpha")
+	if err != nil {
+		t.Fatalf("unexpected ScanTree error: %v", err)
+	}
+	m.allNodes = nodes
+
+	// User collapses root notebook
+	m.allNodes[0].Expanded = false
+
+	// Trigger rescan
+	m.rescanTreePreservingExpansion("")
+
+	if m.allNodes[0].Expanded {
+		t.Errorf("expected root node to remain collapsed after rescanTreePreservingExpansion")
+	}
+}
