@@ -346,3 +346,116 @@ func TestWelcomeNoteSeedingWithRootNode(t *testing.T) {
 		t.Errorf("expected 2 nodes (root + welcome note), got %d", len(nodesAfter))
 	}
 }
+
+func TestRootNodeFormattingAndIcon(t *testing.T) {
+	rootNodeWithChildren := &notes.Node{
+		Title:    "MyNotebook",
+		IsFolder: true,
+		ParentID: -1,
+		Level:    0,
+		ChildIDs: []int{1, 2},
+		Expanded: true,
+	}
+
+	display := formatTreeNodeDisplay(rootNodeWithChildren, false)
+	if !strings.HasPrefix(display, "▾ 󰉋 MyNotebook") {
+		t.Errorf("expected expanded root node to start with '▾ 󰉋 MyNotebook', got %q", display)
+	}
+
+	rootNodeCollapsed := &notes.Node{
+		Title:    "MyNotebook",
+		IsFolder: true,
+		ParentID: -1,
+		Level:    0,
+		ChildIDs: []int{1, 2},
+		Expanded: false,
+	}
+	displayCollapsed := formatTreeNodeDisplay(rootNodeCollapsed, false)
+	if !strings.HasPrefix(displayCollapsed, "▸ 󰉋 MyNotebook") {
+		t.Errorf("expected collapsed root node to start with '▸ 󰉋 MyNotebook', got %q", displayCollapsed)
+	}
+}
+
+func TestRootNodeDestinationDirAndGuards(t *testing.T) {
+	wsPath := "C:\\Users\\test\\vault"
+	m := Model{
+		workspacePath:  wsPath,
+		workspaceName:  "vault",
+		visibleIndices: []int{0},
+		selectedIdx:    0,
+		allNodes: []notes.Node{
+			{
+				ID:       0,
+				Title:    "vault",
+				Path:     wsPath,
+				IsFolder: true,
+				ParentID: -1,
+				Level:    0,
+			},
+		},
+	}
+
+	destDir := m.getDestinationDir()
+	if destDir != wsPath {
+		t.Errorf("getDestinationDir() = %q; want %q", destDir, wsPath)
+	}
+
+	// Verify rename, delete, move modals do not activate for root node
+	m.openRenameModal()
+	if m.modalType != "" {
+		t.Errorf("expected rename modal to remain closed for root node, got %q", m.modalType)
+	}
+
+	m.openDeleteModal()
+	if m.modalType != "" {
+		t.Errorf("expected delete modal to remain closed for root node, got %q", m.modalType)
+	}
+
+	m.openMoveModal()
+	if m.modalType != "" {
+		t.Errorf("expected move modal to remain closed for root node, got %q", m.modalType)
+	}
+}
+
+func TestRootNodeCollapseInVisibleIndices(t *testing.T) {
+	wsPath := "C:\\Users\\test\\vault"
+	m := Model{
+		workspacePath: wsPath,
+		workspaceName: "vault",
+		allNodes: []notes.Node{
+			{
+				ID:       0,
+				Title:    "vault",
+				Path:     wsPath,
+				IsFolder: true,
+				ParentID: -1,
+				Level:    0,
+				Expanded: true,
+				ChildIDs: []int{1},
+			},
+			{
+				ID:       1,
+				Title:    "Note1.md",
+				Path:     wsPath + "\\Note1.md",
+				IsFolder: false,
+				ParentID: 0,
+				Level:    1,
+			},
+		},
+	}
+
+	m.rebuildVisible()
+	if len(m.visibleIndices) != 2 {
+		t.Fatalf("expected 2 visible items when root is expanded, got %d", len(m.visibleIndices))
+	}
+
+	// Collapse root
+	m.allNodes[0].Expanded = false
+	m.rebuildVisible()
+	if len(m.visibleIndices) != 1 {
+		t.Fatalf("expected 1 visible item when root is collapsed, got %d", len(m.visibleIndices))
+	}
+	if m.visibleIndices[0] != 0 {
+		t.Errorf("expected visible item to be root node (ID 0), got %d", m.visibleIndices[0])
+	}
+}

@@ -1371,9 +1371,16 @@ func (m Model) renderActivePreview(width int) string {
 			status = "Expanded (Press [Enter] to collapse)"
 			folderIcon = " "
 		}
+		if item.ParentID == -1 {
+			folderIcon = "󰉋 "
+		}
 		title := ui.BrandStyle.Render(folderIcon + item.Title)
+		displayPath := item.RelPath
+		if displayPath == "" {
+			displayPath = item.Path
+		}
 		info := fmt.Sprintf("\n  %s\n\n  • **Path:** `%s`\n  • **Notes Contained:** %d\n  • **State:** %s\n\n  Press **[Enter]**, **[Space]**, or click to toggle folder contents.",
-			title, item.RelPath, item.NoteCount, status)
+			title, displayPath, item.NoteCount, status)
 		return markdown.RenderDocument(info, width)
 	}
 
@@ -2993,7 +3000,9 @@ func formatTreeNodeDisplay(item *notes.Node, isFilterActive bool) string {
 
 	icon := "󰈙 "
 	if item.IsFolder {
-		if item.Expanded {
+		if item.ParentID == -1 {
+			icon = "󰉋 "
+		} else if item.Expanded {
 			icon = " "
 		} else {
 			icon = " "
