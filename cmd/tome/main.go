@@ -183,8 +183,8 @@ func initialModel() Model {
 
 	allNodes, isObsidian, _ := notes.ScanTree(workspacePath, cfg.SortMode)
 
-	// If workspace is completely empty, provide an initial welcome note
-	if len(allNodes) == 0 {
+	// If workspace is completely empty (no child notes or subfolders), provide an initial welcome note
+	if len(allNodes) == 0 || (len(allNodes) == 1 && len(allNodes[0].ChildIDs) == 0) {
 		welcomePath := filepath.Join(workspacePath, "Welcome to Tome.md")
 		welcomeContent := `# Welcome to Tome 📖
 

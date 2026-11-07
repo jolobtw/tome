@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -306,5 +308,41 @@ func TestBuildNewNoteDetails(t *testing.T) {
 				t.Errorf("initial content should not contain frontmatter dashes: %q", content)
 			}
 		})
+	}
+}
+
+func TestWelcomeNoteSeedingWithRootNode(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "tome-welcome-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	nodes, _, err := notes.ScanTree(tempDir, "alpha")
+	if err != nil {
+		t.Fatalf("unexpected ScanTree error: %v", err)
+	}
+
+	// Workspace is empty if len(nodes) == 0 or (len(nodes) == 1 && len(nodes[0].ChildIDs) == 0)
+	isEmpty := len(nodes) == 0 || (len(nodes) == 1 && len(nodes[0].ChildIDs) == 0)
+	if !isEmpty {
+		t.Errorf("expected newly created directory to be detected as empty workspace")
+	}
+
+	welcomePath := filepath.Join(tempDir, "Welcome to Tome.md")
+	if err := os.WriteFile(welcomePath, []byte("# Welcome to Tome\n"), 0644); err != nil {
+		t.Fatalf("failed to write welcome note: %v", err)
+	}
+
+	nodesAfter, _, err := notes.ScanTree(tempDir, "alpha")
+	if err != nil {
+		t.Fatalf("unexpected ScanTree error: %v", err)
+	}
+	isEmptyAfter := len(nodesAfter) == 0 || (len(nodesAfter) == 1 && len(nodesAfter[0].ChildIDs) == 0)
+	if isEmptyAfter {
+		t.Errorf("expected workspace with welcome note to NOT be empty")
+	}
+	if len(nodesAfter) != 2 {
+		t.Errorf("expected 2 nodes (root + welcome note), got %d", len(nodesAfter))
 	}
 }
