@@ -28,7 +28,7 @@ type Node struct {
 // ScanTree scans the notebook directory and builds an indexed tree of folders and markdown notes
 func ScanTree(root string, sortMode string) ([]Node, bool, error) {
 	var allNodes []Node
-	nodeID := 0
+	nodeID := 1 // 0 is reserved for the root notebook node
 
 	// Check if this is an Obsidian vault
 	obsidianDir := filepath.Join(root, ".obsidian")
@@ -164,10 +164,25 @@ func ScanTree(root string, sortMode string) ([]Node, bool, error) {
 		return myChildIDs, nil
 	}
 
-	_, err := walkDir(root, -1, 0)
+	childIDs, err := walkDir(root, 0, 1)
 	if err != nil {
 		return nil, isObsidian, err
 	}
+
+	rootNode := Node{
+		ID:       0,
+		Title:    filepath.Base(root),
+		FileName: filepath.Base(root),
+		Path:     root,
+		RelPath:  "",
+		IsFolder: true,
+		Expanded: true,
+		Level:    0,
+		ParentID: -1,
+		ChildIDs: childIDs,
+	}
+	allNodes = append([]Node{rootNode}, allNodes...)
+	allNodes[0].NoteCount = countNotes(allNodes, 0)
 
 	return allNodes, isObsidian, nil
 }
