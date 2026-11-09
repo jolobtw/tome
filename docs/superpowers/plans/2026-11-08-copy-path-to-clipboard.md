@@ -40,7 +40,7 @@
 **Interfaces:**
 - Produces: `notes.FormatFriendlyPath(targetPath string, homeDir string) string`
 
-- [ ] **Step 1: Write the failing tests in `internal/notes/path_test.go`**
+- [x] **Step 1: Write the failing tests in `internal/notes/path_test.go`**
 
 ```go
 package notes
@@ -100,12 +100,12 @@ func TestFormatFriendlyPath(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/notes -run TestFormatFriendlyPath`
 Expected: FAIL with undefined `FormatFriendlyPath`.
 
-- [ ] **Step 3: Implement `FormatFriendlyPath` in `internal/notes/path.go`**
+- [x] **Step 3: Implement `FormatFriendlyPath` in `internal/notes/path.go`**
 
 ```go
 package notes
@@ -141,12 +141,12 @@ func FormatFriendlyPath(targetPath string, homeDir string) string {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/notes -run TestFormatFriendlyPath`
 Expected: PASS.
 
-- [ ] **Step 5: Commit and push**
+- [x] **Step 5: Commit and push**
 
 ```bash
 git add internal/notes/path.go internal/notes/path_test.go
@@ -166,18 +166,18 @@ git push
 - Consumes: `notes.FormatFriendlyPath`, `github.com/atotto/clipboard`
 - Produces: `clearStatusMsg` Bubble Tea message, `"c"` / `"C"` key handler in tree pane, updated footer items.
 
-- [ ] **Step 1: Write tests in `cmd/tome/main_test.go` for `clearStatusMsg` and `"c"` key press**
+- [x] **Step 1: Write tests in `cmd/tome/main_test.go` for `clearStatusMsg` and `"c"` key press**
 
 Verify that:
 - Sending `clearStatusMsg` resets `m.statusMsg` to `""`.
 - In tree navigation, pressing `"c"` sets `m.statusMsg` containing `"✓ Copied:"`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./cmd/tome -run TestCopyPathKey`
 Expected: FAIL due to unhandled key / undefined `clearStatusMsg`.
 
-- [ ] **Step 3: Implement clipboard copy and status update in `cmd/tome/main.go`**
+- [x] **Step 3: Implement clipboard copy and status update in `cmd/tome/main.go`**
 
 1. Define `type clearStatusMsg struct{}` and tick helper:
 ```go
@@ -226,17 +226,17 @@ func clearStatusTick(delay time.Duration) tea.Cmd {
    - Prepend `ui.ActiveBadgeStyle.Render(m.statusMsg) + "  "` if `m.statusMsg != ""`.
    - Add `ui.FooterKeyStyle.Render("[C]") + ui.FooterDescStyle.Render(" Copy Path  ")` to tree pane footer items.
 
-- [ ] **Step 4: Run all tests to verify they pass**
+- [x] **Step 4: Run all tests to verify they pass**
 
 Run: `go test ./...`
 Expected: PASS.
 
-- [ ] **Step 5: Verify building application binary**
+- [x] **Step 5: Verify building application binary**
 
 Run: `go build -o tome.exe ./cmd/tome`
 Expected: Clean build with exit code 0.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add cmd/tome/main.go cmd/tome/main_test.go
