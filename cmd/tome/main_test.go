@@ -688,7 +688,7 @@ func TestPreviewStartsAtTopOnSelection(t *testing.T) {
 	}
 }
 
-func TestPreviewMouseWheelScroll1Line(t *testing.T) {
+func TestPreviewMouseWheelScroll3Lines(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "tome-preview-wheel-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -736,14 +736,14 @@ func TestPreviewMouseWheelScroll1Line(t *testing.T) {
 
 	updated, _ := m.Update(mouseWheelDown)
 	m1 := updated.(Model)
-	if m1.viewport.YOffset != 1 {
-		t.Errorf("expected YOffset to be 1 after 1 wheel down scroll, got: %d", m1.viewport.YOffset)
+	if m1.viewport.YOffset != 3 {
+		t.Errorf("expected YOffset to be 3 after 1 wheel down scroll, got: %d", m1.viewport.YOffset)
 	}
 
 	updated, _ = m1.Update(mouseWheelDown)
 	m2 := updated.(Model)
-	if m2.viewport.YOffset != 2 {
-		t.Errorf("expected YOffset to be 2 after second wheel down scroll, got: %d", m2.viewport.YOffset)
+	if m2.viewport.YOffset != 6 {
+		t.Errorf("expected YOffset to be 6 after second wheel down scroll, got: %d", m2.viewport.YOffset)
 	}
 
 	mouseWheelUp := tea.MouseMsg{
@@ -754,8 +754,8 @@ func TestPreviewMouseWheelScroll1Line(t *testing.T) {
 	}
 	updated, _ = m2.Update(mouseWheelUp)
 	m3 := updated.(Model)
-	if m3.viewport.YOffset != 1 {
-		t.Errorf("expected YOffset to be 1 after wheel up scroll, got: %d", m3.viewport.YOffset)
+	if m3.viewport.YOffset != 3 {
+		t.Errorf("expected YOffset to be 3 after wheel up scroll, got: %d", m3.viewport.YOffset)
 	}
 }
 

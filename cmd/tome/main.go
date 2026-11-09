@@ -1182,7 +1182,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateViewportPreview()
 				}
 			} else {
-				m.viewport.LineUp(1)
+				m.viewport.LineUp(3)
 			}
 			return m, nil
 
@@ -1209,7 +1209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateViewportPreview()
 				}
 			} else {
-				m.viewport.LineDown(1)
+				m.viewport.LineDown(3)
 			}
 			return m, nil
 
@@ -1390,7 +1390,7 @@ func (m *Model) recalculateViewport() {
 		m.viewport.Width = viewportWidth
 		m.viewport.Height = viewportHeight
 	}
-	m.viewport.MouseWheelDelta = 1
+	m.viewport.MouseWheelDelta = 3
 	m.editor.SetWidth(max(10, rightTotalWidth-6))
 	m.editor.SetHeight(max(2, panesHeight-3))
 	m.viewport.SetContent(m.renderActivePreview(viewportWidth))
