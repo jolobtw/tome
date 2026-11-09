@@ -1,11 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jolobtw/tome/internal/notes"
@@ -632,4 +634,258 @@ func TestFooterIncludesCopyPath(t *testing.T) {
 		t.Errorf("expected footer to contain [C] Copy Path in tree pane")
 	}
 }
+
+func TestPreviewStartsAtTopOnSelection(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "tome-preview-top-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	filePath := filepath.Join(tempDir, "note.md")
+	var lines []string
+	for i := 1; i <= 60; i++ {
+		lines = append(lines, fmt.Sprintf("Line %d: This is sample note content.", i))
+	}
+	if err := os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		t.Fatalf("failed to write test note: %v", err)
+	}
+
+	m := Model{
+		width:          80,
+		height:         24,
+		ready:          true,
+		activePane:     0,
+		editor:         textarea.New(),
+		workspacePath:  tempDir,
+		workspaceName:  "Test",
+		visibleIndices: []int{0},
+		selectedIdx:    0,
+		allNodes: []notes.Node{
+			{
+				ID:       0,
+				Title:    "note",
+				Path:     filePath,
+				IsFolder: false,
+			},
+		},
+	}
+
+	m.recalculateViewport()
+	if m.viewport.YOffset != 0 {
+		t.Errorf("expected preview to start at top (YOffset == 0), got: %d", m.viewport.YOffset)
+	}
+
+	// Scrolling down and re-selecting should also reset preview to the top
+	m.viewport.GotoBottom()
+	if m.viewport.YOffset == 0 {
+		t.Fatalf("expected GotoBottom to have non-zero YOffset")
+	}
+
+	m.updateViewportPreview()
+	if m.viewport.YOffset != 0 {
+		t.Errorf("expected updateViewportPreview to reset YOffset to 0, got: %d", m.viewport.YOffset)
+	}
+}
+
+func TestPreviewMouseWheelScroll1Line(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "tome-preview-wheel-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	filePath := filepath.Join(tempDir, "note.md")
+	var lines []string
+	for i := 1; i <= 60; i++ {
+		lines = append(lines, fmt.Sprintf("Line %d content", i))
+	}
+	if err := os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		t.Fatalf("failed to write test note: %v", err)
+	}
+
+	m := Model{
+		width:          80,
+		height:         24,
+		ready:          true,
+		activePane:     0,
+		editor:         textarea.New(),
+		workspacePath:  tempDir,
+		workspaceName:  "Test",
+		visibleIndices: []int{0},
+		selectedIdx:    0,
+		allNodes: []notes.Node{
+			{
+				ID:       0,
+				Title:    "note",
+				Path:     filePath,
+				IsFolder: false,
+			},
+		},
+	}
+	m.recalculateViewport()
+
+	// Preview pane X coordinate (leftTotalWidth is max(34, min(52, 78*36/100)) = 34)
+	previewX := 45
+	mouseWheelDown := tea.MouseMsg{
+		Type:   tea.MouseWheelDown,
+		X:      previewX,
+		Y:      10,
+		Button: tea.MouseButtonWheelDown,
+	}
+
+	updated, _ := m.Update(mouseWheelDown)
+	m1 := updated.(Model)
+	if m1.viewport.YOffset != 1 {
+		t.Errorf("expected YOffset to be 1 after 1 wheel down scroll, got: %d", m1.viewport.YOffset)
+	}
+
+	updated, _ = m1.Update(mouseWheelDown)
+	m2 := updated.(Model)
+	if m2.viewport.YOffset != 2 {
+		t.Errorf("expected YOffset to be 2 after second wheel down scroll, got: %d", m2.viewport.YOffset)
+	}
+
+	mouseWheelUp := tea.MouseMsg{
+		Type:   tea.MouseWheelUp,
+		X:      previewX,
+		Y:      10,
+		Button: tea.MouseButtonWheelUp,
+	}
+	updated, _ = m2.Update(mouseWheelUp)
+	m3 := updated.(Model)
+	if m3.viewport.YOffset != 1 {
+		t.Errorf("expected YOffset to be 1 after wheel up scroll, got: %d", m3.viewport.YOffset)
+	}
+}
+
+func TestTopAndBottomKeybinds(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "tome-preview-nav-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	filePath := filepath.Join(tempDir, "note.md")
+	var lines []string
+	for i := 1; i <= 60; i++ {
+		lines = append(lines, fmt.Sprintf("Line %d content", i))
+	}
+	if err := os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+		t.Fatalf("failed to write test note: %v", err)
+	}
+
+	m := Model{
+		width:          80,
+		height:         24,
+		ready:          true,
+		activePane:     0,
+		editor:         textarea.New(),
+		workspacePath:  tempDir,
+		workspaceName:  "Test",
+		visibleIndices: []int{0},
+		selectedIdx:    0,
+		allNodes: []notes.Node{
+			{
+				ID:       0,
+				Title:    "note",
+				Path:     filePath,
+				IsFolder: false,
+			},
+		},
+	}
+	m.recalculateViewport()
+
+	// 1. From Tree Pane (activePane == 0), press 'b' to jump note preview to bottom
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	mTreeBottom := updated.(Model)
+	if mTreeBottom.viewport.YOffset == 0 || !mTreeBottom.viewport.AtBottom() {
+		t.Errorf("expected 'b' in tree pane to scroll preview to bottom, got YOffset: %d", mTreeBottom.viewport.YOffset)
+	}
+
+	// Press 't' in tree pane to jump back to top
+	updated, _ = mTreeBottom.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	mTreeTop := updated.(Model)
+	if mTreeTop.viewport.YOffset != 0 {
+		t.Errorf("expected 't' in tree pane to scroll preview to top, got YOffset: %d", mTreeTop.viewport.YOffset)
+	}
+
+	// Test ctrl+end and ctrl+home in tree pane
+	updated, _ = mTreeTop.Update(tea.KeyMsg{Type: tea.KeyCtrlEnd})
+	mTreeCtrlEnd := updated.(Model)
+	if mTreeCtrlEnd.viewport.YOffset == 0 {
+		t.Errorf("expected ctrl+end in tree pane to scroll preview to bottom")
+	}
+
+	updated, _ = mTreeCtrlEnd.Update(tea.KeyMsg{Type: tea.KeyCtrlHome})
+	mTreeCtrlHome := updated.(Model)
+	if mTreeCtrlHome.viewport.YOffset != 0 {
+		t.Errorf("expected ctrl+home in tree pane to scroll preview to top")
+	}
+
+	// 2. Switch to Preview Pane (activePane == 1)
+	mPreview := mTreeTop
+	mPreview.activePane = 1
+
+	// Test 'b' and 't'
+	updated, _ = mPreview.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	if updated.(Model).viewport.YOffset == 0 {
+		t.Errorf("expected 'b' in preview pane to scroll to bottom")
+	}
+	updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if updated.(Model).viewport.YOffset != 0 {
+		t.Errorf("expected 't' in preview pane to scroll to top")
+	}
+
+	// Test 'G' and 'g'
+	updated, _ = mPreview.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+	if updated.(Model).viewport.YOffset == 0 {
+		t.Errorf("expected 'G' in preview pane to scroll to bottom")
+	}
+	updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	if updated.(Model).viewport.YOffset != 0 {
+		t.Errorf("expected 'g' in preview pane to scroll to top")
+	}
+
+	// Test 'End' and 'Home'
+	updated, _ = mPreview.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	if updated.(Model).viewport.YOffset == 0 {
+		t.Errorf("expected 'End' in preview pane to scroll to bottom")
+	}
+	updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyHome})
+	if updated.(Model).viewport.YOffset != 0 {
+		t.Errorf("expected 'Home' in preview pane to scroll to top")
+	}
+}
+
+func TestFooterIncludesTopEndKeybinds(t *testing.T) {
+	// Tree pane footer
+	mTree := Model{activePane: 0}
+	itemsTree := mTree.getFooterItems()
+	foundTree := false
+	for _, it := range itemsTree {
+		if strings.Contains(it, "[T/B]") && strings.Contains(it, "Note Top/End") {
+			foundTree = true
+			break
+		}
+	}
+	if !foundTree {
+		t.Errorf("expected tree pane footer to include [T/B] Note Top/End")
+	}
+
+	// Preview pane footer
+	mPreview := Model{activePane: 1}
+	itemsPreview := mPreview.getFooterItems()
+	foundPreview := false
+	for _, it := range itemsPreview {
+		if strings.Contains(it, "[Home/End/T/B]") && strings.Contains(it, "Top/End") {
+			foundPreview = true
+			break
+		}
+	}
+	if !foundPreview {
+		t.Errorf("expected preview pane footer to include [Home/End/T/B] Top/End")
+	}
+}
+
 

@@ -833,6 +833,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.activePane = 1 - m.activePane
 
+		case "ctrl+home", "t", "T":
+			m.viewport.GotoTop()
+			return m, nil
+
+		case "ctrl+end", "b", "B":
+			m.viewport.GotoBottom()
+			return m, nil
+
 		case "home", "g":
 			if m.activePane == 1 {
 				m.viewport.GotoTop()
@@ -1174,8 +1182,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateViewportPreview()
 				}
 			} else {
-				m.viewport.LineUp(5)
+				m.viewport.LineUp(1)
 			}
+			return m, nil
 
 		case tea.MouseWheelDown:
 			if msg.X < leftTotalWidth {
@@ -1200,8 +1209,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.updateViewportPreview()
 				}
 			} else {
-				m.viewport.LineDown(5)
+				m.viewport.LineDown(1)
 			}
+			return m, nil
 
 		case tea.MouseLeft:
 			if msg.X >= leftTotalWidth {
@@ -1275,6 +1285,7 @@ func (m Model) getFooterItems() []string {
 	if m.activePane == 1 {
 		items = append(items,
 			ui.FooterKeyStyle.Render("[W/S/Wheel]")+ui.FooterDescStyle.Render(" Scroll  "),
+			ui.FooterKeyStyle.Render("[Home/End/T/B]")+ui.FooterDescStyle.Render(" Top/End  "),
 			ui.FooterKeyStyle.Render("[Ctrl+F]")+ui.FooterDescStyle.Render(" Search  "),
 			ui.FooterKeyStyle.Render("[Tab/A]")+ui.FooterDescStyle.Render(" Tree Pane  "),
 			ui.FooterKeyStyle.Render("[E]")+ui.FooterDescStyle.Render(" Edit  "),
@@ -1286,6 +1297,7 @@ func (m Model) getFooterItems() []string {
 	}
 	items = append(items,
 		ui.FooterKeyStyle.Render("[W/S/A/D]")+ui.FooterDescStyle.Render(" Move/Fold  "),
+		ui.FooterKeyStyle.Render("[T/B]")+ui.FooterDescStyle.Render(" Note Top/End  "),
 		ui.FooterKeyStyle.Render("[/]")+ui.FooterDescStyle.Render(" Filter  "),
 		ui.FooterKeyStyle.Render("[Ctrl+F]")+ui.FooterDescStyle.Render(" Search  "),
 		ui.FooterKeyStyle.Render("[Enter]")+ui.FooterDescStyle.Render(" Open  "),
@@ -1378,16 +1390,17 @@ func (m *Model) recalculateViewport() {
 		m.viewport.Width = viewportWidth
 		m.viewport.Height = viewportHeight
 	}
+	m.viewport.MouseWheelDelta = 1
 	m.editor.SetWidth(max(10, rightTotalWidth-6))
 	m.editor.SetHeight(max(2, panesHeight-3))
 	m.viewport.SetContent(m.renderActivePreview(viewportWidth))
-	m.viewport.GotoBottom()
+	m.viewport.GotoTop()
 }
 
 func (m *Model) updateViewportPreview() {
 	if m.viewport.Width > 0 {
 		m.viewport.SetContent(m.renderActivePreview(m.viewport.Width))
-		m.viewport.GotoBottom()
+		m.viewport.GotoTop()
 	}
 }
 
