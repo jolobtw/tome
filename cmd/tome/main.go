@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -118,10 +119,17 @@ type Model struct {
 }
 
 // Custom animation and streaming messages
+type clearStatusMsg struct{}
 type animTickMsg time.Time
 type slideTickMsg struct{}
 type aiStreamMsg string
 type aiStartStreamMsg struct{}
+
+func clearStatusTick(delay time.Duration) tea.Cmd {
+	return tea.Tick(delay, func(t time.Time) tea.Msg {
+		return clearStatusMsg{}
+	})
+}
 
 func animTick() tea.Cmd {
 	return tea.Tick(90*time.Millisecond, func(t time.Time) tea.Msg {
@@ -494,6 +502,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.aiState = "idle"
 		}
+
+	case clearStatusMsg:
+		m.statusMsg = ""
+		return m, nil
 
 	case tea.KeyMsg:
 		// When a floating modal is open, route keys to the modal dialog
@@ -945,6 +957,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case "c", "C":
+			if m.activePane == 0 && m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
+				actualID := m.visibleIndices[m.selectedIdx]
+				var targetPath string
+				for idx := range m.allNodes {
+					if m.allNodes[idx].ID == actualID {
+						targetPath = m.allNodes[idx].Path
+						break
+					}
+				}
+				if targetPath == "" && actualID == 0 {
+					targetPath = m.workspacePath
+				}
+				if targetPath != "" {
+					homeDir, _ := os.UserHomeDir()
+					formatted := notes.FormatFriendlyPath(targetPath, homeDir)
+					if err := clipboard.WriteAll(formatted); err != nil {
+						m.statusMsg = "⚠ Clipboard unavailable"
+					} else {
+						m.statusMsg = fmt.Sprintf("✓ Copied: %s", formatted)
+					}
+					return m, clearStatusTick(2 * time.Second)
+				}
+			}
+
 		case "e":
 			// Enter in-place editor mode if selected item is a note
 			if m.selectedIdx >= 0 && m.selectedIdx < len(m.visibleIndices) {
@@ -1231,32 +1268,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) getFooterItems() []string {
+	var items []string
+	if m.statusMsg != "" {
+		items = append(items, ui.ActiveBadgeStyle.Render(m.statusMsg))
+	}
 	if m.activePane == 1 {
-		return []string{
-			ui.FooterKeyStyle.Render("[W/S/Wheel]") + ui.FooterDescStyle.Render(" Scroll  "),
-			ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  "),
-			ui.FooterKeyStyle.Render("[Tab/A]") + ui.FooterDescStyle.Render(" Tree Pane  "),
-			ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  "),
-			ui.FooterKeyStyle.Render("[F1/Ctrl+G]") + ui.FooterDescStyle.Render(" Guide  "),
-			ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  "),
-			ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit"),
-		}
+		items = append(items,
+			ui.FooterKeyStyle.Render("[W/S/Wheel]")+ui.FooterDescStyle.Render(" Scroll  "),
+			ui.FooterKeyStyle.Render("[Ctrl+F]")+ui.FooterDescStyle.Render(" Search  "),
+			ui.FooterKeyStyle.Render("[Tab/A]")+ui.FooterDescStyle.Render(" Tree Pane  "),
+			ui.FooterKeyStyle.Render("[E]")+ui.FooterDescStyle.Render(" Edit  "),
+			ui.FooterKeyStyle.Render("[F1/Ctrl+G]")+ui.FooterDescStyle.Render(" Guide  "),
+			ui.FooterKeyStyle.Render("[Ctrl+K]")+ui.FooterDescStyle.Render(" Cloud AI  "),
+			ui.FooterKeyStyle.Render("[Q]")+ui.FooterDescStyle.Render(" Quit"),
+		)
+		return items
 	}
-	return []string{
-		ui.FooterKeyStyle.Render("[W/S/A/D]") + ui.FooterDescStyle.Render(" Move/Fold  "),
-		ui.FooterKeyStyle.Render("[/]") + ui.FooterDescStyle.Render(" Filter  "),
-		ui.FooterKeyStyle.Render("[Ctrl+F]") + ui.FooterDescStyle.Render(" Search  "),
-		ui.FooterKeyStyle.Render("[Enter]") + ui.FooterDescStyle.Render(" Open  "),
-		ui.FooterKeyStyle.Render("[E]") + ui.FooterDescStyle.Render(" Edit  "),
-		ui.FooterKeyStyle.Render("[N]") + ui.FooterDescStyle.Render(" New  "),
-		ui.FooterKeyStyle.Render("[F]") + ui.FooterDescStyle.Render(" Folder  "),
-		ui.FooterKeyStyle.Render("[R]") + ui.FooterDescStyle.Render(" Rename  "),
-		ui.FooterKeyStyle.Render("[M]") + ui.FooterDescStyle.Render(" Move  "),
-		ui.FooterKeyStyle.Render("[X]") + ui.FooterDescStyle.Render(" Del  "),
-		ui.FooterKeyStyle.Render("[L]") + ui.FooterDescStyle.Render(" Quick Log  "),
-		ui.FooterKeyStyle.Render("[Ctrl+K]") + ui.FooterDescStyle.Render(" Cloud AI  "),
-		ui.FooterKeyStyle.Render("[Q]") + ui.FooterDescStyle.Render(" Quit"),
-	}
+	items = append(items,
+		ui.FooterKeyStyle.Render("[W/S/A/D]")+ui.FooterDescStyle.Render(" Move/Fold  "),
+		ui.FooterKeyStyle.Render("[/]")+ui.FooterDescStyle.Render(" Filter  "),
+		ui.FooterKeyStyle.Render("[Ctrl+F]")+ui.FooterDescStyle.Render(" Search  "),
+		ui.FooterKeyStyle.Render("[Enter]")+ui.FooterDescStyle.Render(" Open  "),
+		ui.FooterKeyStyle.Render("[C]")+ui.FooterDescStyle.Render(" Copy Path  "),
+		ui.FooterKeyStyle.Render("[E]")+ui.FooterDescStyle.Render(" Edit  "),
+		ui.FooterKeyStyle.Render("[N]")+ui.FooterDescStyle.Render(" New  "),
+		ui.FooterKeyStyle.Render("[F]")+ui.FooterDescStyle.Render(" Folder  "),
+		ui.FooterKeyStyle.Render("[R]")+ui.FooterDescStyle.Render(" Rename  "),
+		ui.FooterKeyStyle.Render("[M]")+ui.FooterDescStyle.Render(" Move  "),
+		ui.FooterKeyStyle.Render("[X]")+ui.FooterDescStyle.Render(" Del  "),
+		ui.FooterKeyStyle.Render("[L]")+ui.FooterDescStyle.Render(" Quick Log  "),
+		ui.FooterKeyStyle.Render("[Ctrl+K]")+ui.FooterDescStyle.Render(" Cloud AI  "),
+		ui.FooterKeyStyle.Render("[Q]")+ui.FooterDescStyle.Render(" Quit"),
+	)
+	return items
 }
 
 func (m Model) getFooterHeight(usableWidth int) int {

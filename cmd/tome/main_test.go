@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jolobtw/tome/internal/notes"
 	"github.com/jolobtw/tome/internal/ui"
@@ -533,3 +534,102 @@ func TestRescanTreePreservesCollapsedRoot(t *testing.T) {
 		t.Errorf("expected root node to remain collapsed after rescanTreePreservingExpansion")
 	}
 }
+
+func TestCopyPathKey(t *testing.T) {
+	homeDir, _ := os.UserHomeDir()
+	wsPath := filepath.Join(homeDir, "Notes")
+	notePath := filepath.Join(wsPath, "daily.md")
+
+	m := Model{
+		activePane:     0,
+		workspacePath:  wsPath,
+		workspaceName:  "Notes",
+		visibleIndices: []int{0, 1},
+		selectedIdx:    1,
+		allNodes: []notes.Node{
+			{
+				ID:       0,
+				Title:    "Notes",
+				Path:     wsPath,
+				IsFolder: true,
+				ParentID: -1,
+				Level:    0,
+			},
+			{
+				ID:       1,
+				Title:    "daily",
+				Path:     notePath,
+				IsFolder: false,
+				ParentID: 0,
+				Level:    1,
+			},
+		},
+	}
+
+	// Pressing "c"
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	model := updated.(Model)
+	if !strings.Contains(model.statusMsg, "Copied:") {
+		t.Fatalf("expected statusMsg to contain 'Copied:', got: %q", model.statusMsg)
+	}
+	if !strings.Contains(model.statusMsg, "~/Notes/daily.md") {
+		t.Fatalf("expected statusMsg to contain '~/Notes/daily.md', got: %q", model.statusMsg)
+	}
+	if cmd == nil {
+		t.Fatalf("expected timer cmd to clear statusMsg, got nil")
+	}
+
+	// Delivering clearStatusMsg resets statusMsg
+	cleared, _ := model.Update(clearStatusMsg{})
+	if cleared.(Model).statusMsg != "" {
+		t.Errorf("expected statusMsg to be cleared, got: %q", cleared.(Model).statusMsg)
+	}
+}
+
+func TestCopyPathRootNotebook(t *testing.T) {
+	homeDir, _ := os.UserHomeDir()
+	wsPath := filepath.Join(homeDir, "Notes")
+
+	m := Model{
+		activePane:     0,
+		workspacePath:  wsPath,
+		workspaceName:  "Notes",
+		visibleIndices: []int{0},
+		selectedIdx:    0,
+		allNodes: []notes.Node{
+			{
+				ID:       0,
+				Title:    "Notes",
+				Path:     wsPath,
+				IsFolder: true,
+				ParentID: -1,
+				Level:    0,
+			},
+		},
+	}
+
+	// Pressing "c" on root notebook
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	model := updated.(Model)
+	if !strings.Contains(model.statusMsg, "~/Notes") {
+		t.Fatalf("expected statusMsg to contain '~/Notes', got: %q", model.statusMsg)
+	}
+}
+
+func TestFooterIncludesCopyPath(t *testing.T) {
+	m := Model{
+		activePane: 0,
+	}
+	items := m.getFooterItems()
+	found := false
+	for _, it := range items {
+		if strings.Contains(it, "[C]") && strings.Contains(it, "Copy Path") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected footer to contain [C] Copy Path in tree pane")
+	}
+}
+
